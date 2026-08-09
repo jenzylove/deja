@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vercel
+.amplify-hosting/
+coverage/
+*.tsbuildinfo
+data/private/
