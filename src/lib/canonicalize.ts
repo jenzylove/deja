@@ -34,7 +34,22 @@ export interface CanonicalThesis {
 const SYSTEM = `You normalise a trader's stated reason for a trade into structured attributes.
 
 Rules:
-- Choose exactly one strategy from: ${STRATEGIES.join(", ")}
+- Choose exactly one strategy. The distinguishing question for each is given —
+  these are not interchangeable labels, and the strategy is the key every
+  statistic about this trader is grouped by:
+    breakout_retest — a level broke AND price returned to test it before the
+      entry. The retest is required. No retest mentioned means this is NOT it.
+    momentum       — entering into strength as it moves, without waiting for a
+      pullback or retest. Coil/consolidation breaks with no retest belong here.
+    trend_pullback — entering a dip inside an already-established trend, at a
+      moving average or prior support. No level break is involved.
+    reversal       — expecting the prevailing move to END. Exhaustion, fading,
+      divergence, calling a top or bottom.
+    range          — price bounded between two levels, trading an edge back
+      toward the middle.
+    news           — driven by an announcement, catalyst or data release.
+    scalp          — explicitly a very short hold for a small target.
+    other          — none of the above genuinely fits.
 - Choose exactly one market_thesis from: ${MARKET_THESES.join(", ")}
 - market_thesis describes what the trader expects the PRICE to do next, in the
   direction of their position — not the shape of the setup:

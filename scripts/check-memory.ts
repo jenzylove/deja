@@ -13,6 +13,7 @@
 import "./load-env";
 import { db, toVector } from "../src/lib/db";
 import { embedQuery } from "../src/lib/bedrock";
+import { canonicalizeThesis } from "../src/lib/canonicalize";
 import { summarize, qualifiesAsPattern, pct, renderable } from "../src/lib/stats";
 
 const EMAIL = "demo@deja.app";
@@ -37,31 +38,46 @@ async function main() {
   // ---- 1. retrieval quality -------------------------------------------------
   console.log("Retrieval quality — strategy purity of top-8 by cosine\n");
 
-  // These MUST be paraphrases, never the canonical strings themselves. Probing
-  // with text identical to what was seeded measures exact string match and
-  // returns a meaningless 100% at distance 0.0000. Real user theses are worded
-  // differently from anything already in memory, so the probe has to be too.
-  const probes: { label: string; text: string; expect: string }[] = [
+  // Probes are RAW TRADER PROSE and go through the real path: the LLM
+  // canonicalises, then the canonical form is embedded. An earlier version of
+  // this check embedded hand-written pseudo-canonical text, which is not a path
+  // the product ever takes, and it hid the actual defect — strategy
+  // misclassification, not embedding quality.
+  const probes: { label: string; raw: string; direction: string; expect: string }[] = [
     {
-      label: "breakout retest (paraphrased)",
-      text: "level flip; ceiling gave way then price came back and the old ceiling acted as a floor, participation picked up; expecting the move to extend",
-      expect: "breakout_retest",
-    },
-    {
-      label: "reversal into exhaustion (paraphrased)",
-      text: "fade; move went vertical then buyers disappeared and it printed a long upper shadow; expecting the trend to turn",
+      label: "reversal",
+      raw: "this thing has gone vertical for three days straight, volume is drying up and we just printed a big wick into resistance. fading it here",
+      direction: "short",
       expect: "reversal",
     },
     {
-      label: "range mean-reversion (paraphrased)",
-      text: "boundary trade; price sitting at the floor of a sideways band and refusing to break it; expecting a snap back to the middle",
+      label: "breakout retest",
+      raw: "cleared the old high, came back down to tap it and buyers stepped in. closed above so im taking continuation",
+      direction: "long",
+      expect: "breakout_retest",
+    },
+    {
+      label: "range",
+      raw: "been chopping between two levels all week, price is at the bottom again and bouncing. buying the low",
+      direction: "long",
       expect: "range",
+    },
+    {
+      label: "momentum",
+      raw: "huge candle just broke out of the coil with massive volume, riding this",
+      direction: "long",
+      expect: "momentum",
     },
   ];
 
   let purityTotal = 0;
   for (const p of probes) {
-    const v = await embedQuery(p.text);
+    const canon = await canonicalizeThesis({
+      thesisRaw: p.raw, direction: p.direction,
+      assetClass: "crypto", regime: "trending", session: "ny",
+    });
+    const v = await embedQuery(canon.canonical);
+    const labelOk = canon.strategy === p.expect;
     const { rows } = await pool.query<{ strategy: string; d: string }>(
       `SELECT strategy, thesis_embedding <=> $2 AS d
          FROM trade_intents
