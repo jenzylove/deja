@@ -10,7 +10,8 @@
     "verify:bedrock": "tsx scripts/verify-bedrock.ts",
     "verify:db": "tsx scripts/verify-db.ts",
     "verify:all": "npm run verify:bedrock && npm run verify:db",
-    "models": "tsx scripts/list-models.ts"
+    "models": "tsx scripts/list-models.ts",
+    "db:bootstrap": "tsx scripts/bootstrap-db.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1106.0",
