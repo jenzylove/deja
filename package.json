@@ -16,7 +16,8 @@
     "try:canon": "tsx scripts/try-canonicalize.ts",
     "seed": "tsx scripts/seed.ts",
     "check:memory": "tsx scripts/check-memory.ts",
-    "import": "tsx scripts/import-csv.ts"
+    "import": "tsx scripts/import-csv.ts",
+    "check:retrieval": "tsx scripts/check-retrieval.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1106.0",

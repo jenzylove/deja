@@ -21,7 +21,7 @@
 import "./load-env";
 import { db, toVector } from "../src/lib/db";
 import { embedMany } from "../src/lib/bedrock";
-import { sessionForDate } from "../src/lib/canonicalize";
+import { sessionForDate, canonicalizeThesis, type Strategy as AnyStrategy } from "../src/lib/canonicalize";
 
 const SEED = 20260810;
 const N_TRADES = 180;
@@ -89,9 +89,9 @@ const THESIS: Record<Strategy, { confirmed: string[]; early: string[]; signals: 
       "resistance at {lvl} broke on expanding volume, pulled back and buyers defended it. candle closed above, entering",
     ],
     early: [
-      "breaking {lvl} right now on good volume, jumping in before the retest completes so i don't miss it",
-      "just cleared {lvl}, hasn't retested yet but momentum looks strong, getting in early",
-      "pushing through {lvl}, taking it now rather than waiting for confirmation",
+      "broke {lvl} and it's coming back to retest now, candle hasn't closed yet but i'm taking it early so i don't miss the move",
+      "retesting {lvl} as we speak, hasn't held yet but it looks like it will, entering before confirmation",
+      "pulled back into the {lvl} breakout level, no confirmation candle yet, getting in ahead of it",
     ],
     signals: [
       ["resistance breakout", "retest holding", "volume expansion"],
@@ -150,7 +150,7 @@ interface Row {
   asset: string;
   price: number;
   direction: "long" | "short";
-  strategy: Strategy;
+  strategy: AnyStrategy;
   confirmed: boolean;
   riskPct: number;
   thesisRaw: string;
@@ -282,6 +282,37 @@ async function main() {
     [userId],
   );
   console.log("  ✓ user, account, 4 rules");
+
+  // Classify through the same path production uses. The generator knows what
+  // it intended, but if stored labels come from the generator while live
+  // queries are labelled by the classifier, the two disagree over identical
+  // prose and cohorts silently split in half.
+  console.log(`  … classifying ${rows.length} theses through the live classifier`);
+  let relabelled = 0;
+  const width = 4;
+  for (let i = 0; i < rows.length; i += width) {
+    const batch = rows.slice(i, i + width);
+    const out = await Promise.all(
+      batch.map((x) =>
+        canonicalizeThesis({
+          thesisRaw: x.thesisRaw, direction: x.direction,
+          assetClass: "crypto", regime: x.regime, session: x.session,
+        }).catch(() => null),
+      ),
+    );
+    out.forEach((c, j) => {
+      if (!c) return;
+      if (c.strategy !== batch[j].strategy) relabelled++;
+      batch[j].strategy = c.strategy;
+      batch[j].signals = c.signals;
+      batch[j].canonical = c.canonical;
+      batch[j].confirmed = c.confirmationStated;
+    });
+    if ((i + width) % 60 === 0 || i + width >= rows.length) {
+      console.log(`      ${Math.min(i + width, rows.length)}/${rows.length}`);
+    }
+  }
+  console.log(`  ✓ classified (${relabelled} differed from the generator's intent)`);
 
   console.log(`  … embedding ${rows.length} canonical theses`);
   const vectors = await embedMany(rows.map((x) => x.canonical), {
