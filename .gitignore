@@ -13,3 +13,6 @@ dist/
 coverage/
 *.tsbuildinfo
 data/private/
+
+# scaffold leftovers
+/deja-scaffold
