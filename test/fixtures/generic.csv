@@ -1,0 +1,5 @@
+date,symbol,side,size,entry price,exit price,stop loss,pnl
+2026-04-01T09:00:00Z,BTC,long,0.1,68000,69500,67200,150.00
+2026-04-01T09:11:00Z,BTC,long,0.1,69500,68900,"69,100","(60.00)"
+2026-04-02T13:20:00Z,ETH,short,1.5,3500,3420,3560,120.00
+bad row,,,,,,,
