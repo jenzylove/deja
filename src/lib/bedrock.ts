@@ -78,30 +78,73 @@ export async function chat(opts: {
 }
 
 /**
- * Titan Text Embeddings V2. Dimension must match the VECTOR(n) column — a
- * mismatch here silently poisons every retrieval, so it is asserted.
+ * Whether the text is being stored or searched with.
+ *
+ * This distinction is the whole reason for the embedding model choice. A stored
+ * thesis and a query about it play different roles, and a model that embeds
+ * them into the same symmetric space cannot express that. Measured on the
+ * seeded corpus: Titan v2 scored 60% strategy purity, Cohere v4 with asymmetric
+ * input types scored 80%, against a 42% majority-class share. See
+ * scripts/compare-embeddings.ts — the comparison is reproducible.
  */
-export async function embed(text: string): Promise<number[]> {
-  const e = env();
+export type EmbedRole = "document" | "query";
 
-  const res = await bedrock().send(
-    new InvokeModelCommand({
-      modelId: e.BEDROCK_MODEL_EMBED,
-      contentType: "application/json",
-      accept: "application/json",
-      body: JSON.stringify({
-        inputText: text,
-        dimensions: e.EMBED_DIMS,
-        normalize: true,
+function isCohere(modelId: string): boolean {
+  return modelId.startsWith("cohere.");
+}
+
+async function embedBatch(texts: string[], role: EmbedRole): Promise<number[][]> {
+  const e = env();
+  const modelId = e.BEDROCK_MODEL_EMBED;
+
+  if (isCohere(modelId)) {
+    const res = await bedrock().send(
+      new InvokeModelCommand({
+        modelId,
+        contentType: "application/json",
+        accept: "application/json",
+        body: JSON.stringify({
+          texts,
+          input_type: role === "query" ? "search_query" : "search_document",
+          embedding_types: ["float"],
+          output_dimension: e.EMBED_DIMS,
+        }),
       }),
+    );
+    const parsed = JSON.parse(new TextDecoder().decode(res.body)) as {
+      embeddings?: { float?: number[][] } | number[][];
+    };
+    const raw = parsed.embeddings;
+    const vecs = Array.isArray(raw) ? raw : raw?.float;
+    if (!vecs) throw new Error("No embeddings returned from Cohere");
+    return vecs;
+  }
+
+  // Titan and similar: symmetric, one text per call, role ignored.
+  return Promise.all(
+    texts.map(async (text) => {
+      const res = await bedrock().send(
+        new InvokeModelCommand({
+          modelId,
+          contentType: "application/json",
+          accept: "application/json",
+          body: JSON.stringify({ inputText: text, dimensions: e.EMBED_DIMS, normalize: true }),
+        }),
+      );
+      const parsed = JSON.parse(new TextDecoder().decode(res.body)) as { embedding?: number[] };
+      if (!parsed.embedding) throw new Error("No embedding returned");
+      return parsed.embedding;
     }),
   );
+}
 
-  const parsed = JSON.parse(new TextDecoder().decode(res.body)) as {
-    embedding?: number[];
-  };
-  const vec = parsed.embedding;
-
+/**
+ * Dimension is asserted against the schema on every call — a model swap that
+ * silently changes width would poison every retrieval without erroring.
+ */
+export async function embed(text: string, role: EmbedRole = "document"): Promise<number[]> {
+  const e = env();
+  const [vec] = await embedBatch([text], role);
   if (!vec || vec.length !== e.EMBED_DIMS) {
     throw new Error(
       `Embedding dimension mismatch: got ${vec?.length ?? 0}, expected ${e.EMBED_DIMS}. ` +
@@ -111,14 +154,59 @@ export async function embed(text: string): Promise<number[]> {
   return vec;
 }
 
-export async function embedMany(texts: string[]): Promise<number[][]> {
-  // Titan has no batch endpoint; bound the concurrency so bulk CSV import
-  // doesn't trip throttling.
+/** Embed a search query. Never use embed() for this on an asymmetric model. */
+export const embedQuery = (text: string) => embed(text, "query");
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function isThrottle(err: unknown): boolean {
+  const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+  return (
+    e?.name === "ThrottlingException" ||
+    e?.$metadata?.httpStatusCode === 429 ||
+    /too many requests|throttl/i.test(e?.message ?? "")
+  );
+}
+
+/**
+ * Retries throttling with exponential backoff and jitter. Bedrock's on-demand
+ * embedding quota is low enough that any bulk operation will hit it, so this is
+ * the normal path rather than an edge case.
+ */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 6): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isThrottle(err) || i === attempts - 1) throw err;
+      // Jitter matters: without it, a throttled batch retries in lockstep and
+      // throttles again at exactly the same moment.
+      await sleep(Math.min(8000, 2 ** i * 400) + Math.random() * 300);
+    }
+  }
+  throw lastErr;
+}
+
+export async function embedMany(
+  texts: string[],
+  opts: {
+    role?: EmbedRole;
+    batchSize?: number;
+    onProgress?: (done: number, total: number) => void;
+  } = {},
+): Promise<number[][]> {
+  const role = opts.role ?? "document";
+  // Cohere accepts many texts per call, which is dramatically cheaper on
+  // request quota than one-at-a-time; Titan does not, so the batch degrades to
+  // bounded concurrency inside embedBatch.
+  const width = opts.batchSize ?? (isCohere(env().BEDROCK_MODEL_EMBED) ? 90 : 3);
   const out: number[][] = [];
-  const width = 5;
   for (let i = 0; i < texts.length; i += width) {
     const slice = texts.slice(i, i + width);
-    out.push(...(await Promise.all(slice.map(embed))));
+    out.push(...(await withRetry(() => embedBatch(slice, role))));
+    opts.onProgress?.(Math.min(i + width, texts.length), texts.length);
   }
   return out;
 }

@@ -11,8 +11,10 @@ export function db(): Pool {
       connectionString: env().DATABASE_URL,
       max: 10,
       idleTimeoutMillis: 30_000,
-      // Fail fast rather than hang the request path at intent time.
-      connectionTimeoutMillis: 10_000,
+      // Generous: the cluster is multi-region, so first-connection latency is
+      // real. The request path guards itself with its own timeouts instead.
+      connectionTimeoutMillis: 30_000,
+      statement_timeout: 60_000,
     });
   }
   return appPool;
@@ -33,7 +35,12 @@ export function dbReadOnly(): Pool {
     );
   }
   if (!roPool) {
-    roPool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 10_000 });
+    roPool = new Pool({
+      connectionString: url,
+      max: 5,
+      connectionTimeoutMillis: 30_000,
+      statement_timeout: 30_000,
+    });
   }
   return roPool;
 }

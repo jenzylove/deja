@@ -21,7 +21,7 @@ async function main() {
     console.log(`  canonical: ${c.canonical}`);
     out.push(c.canonical);
   }
-  const vs = await Promise.all(out.map(embed));
+  const vs = await Promise.all(out.map((t) => embed(t)));
   const cos = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
   console.log(`\n  paraphrase pair (0 vs 1): ${cos(vs[0], vs[1]).toFixed(3)}`);
   console.log(`  unrelated pair  (0 vs 2): ${cos(vs[0], vs[2]).toFixed(3)}`);

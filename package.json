@@ -13,7 +13,9 @@
     "models": "tsx scripts/list-models.ts",
     "db:bootstrap": "tsx scripts/bootstrap-db.ts",
     "db:push": "tsx scripts/db-push.ts",
-    "try:canon": "tsx scripts/try-canonicalize.ts"
+    "try:canon": "tsx scripts/try-canonicalize.ts",
+    "seed": "tsx scripts/seed.ts",
+    "check:memory": "tsx scripts/check-memory.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1106.0",
