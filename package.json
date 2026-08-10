@@ -9,9 +9,11 @@
     "lint": "eslint",
     "verify:bedrock": "tsx scripts/verify-bedrock.ts",
     "verify:db": "tsx scripts/verify-db.ts",
-    "verify:all": "npm run verify:bedrock && npm run verify:db"
+    "verify:all": "npm run verify:bedrock && npm run verify:db",
+    "models": "tsx scripts/list-models.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock": "^3.1106.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1106.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

@@ -8,7 +8,7 @@
  *
  *   npm run verify:db
  */
-import "dotenv/config";
+import "./load-env";
 import { db, dbReadOnly, toVector } from "../src/lib/db";
 import { env } from "../src/lib/env";
 

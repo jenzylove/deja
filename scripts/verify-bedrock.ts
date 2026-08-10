@@ -7,7 +7,7 @@
  *
  *   npm run verify:bedrock
  */
-import "dotenv/config";
+import "./load-env";
 import { chat, embed } from "../src/lib/bedrock";
 import { env } from "../src/lib/env";
 
