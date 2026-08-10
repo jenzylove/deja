@@ -11,7 +11,9 @@
     "verify:db": "tsx scripts/verify-db.ts",
     "verify:all": "npm run verify:bedrock && npm run verify:db",
     "models": "tsx scripts/list-models.ts",
-    "db:bootstrap": "tsx scripts/bootstrap-db.ts"
+    "db:bootstrap": "tsx scripts/bootstrap-db.ts",
+    "db:push": "tsx scripts/db-push.ts",
+    "try:canon": "tsx scripts/try-canonicalize.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1106.0",
