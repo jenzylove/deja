@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Deja",
-  description: "A decision-memory layer for traders. You've been here before.",
+  title: "Deja | Paper decision memory",
+  description: "A paper-trading decision checkpoint grounded in your own history.",
 };
 
 export default function RootLayout({

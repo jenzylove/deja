@@ -9,7 +9,7 @@ Deja is a paper-trading decision-memory layer. Preserve the locked scope in `doc
 - Do not edit another project.
 
 ## Current gate
-Implement the Phase 4 tracer bullet only: validate one trade intent, canonicalize it through the existing Bedrock adapter, retrieve comparable memories through the existing CockroachDB adapter, evaluate active rules through `src/lib/rules.ts`, and return a structured grounded result. Production wiring must use the real adapters. Tests may inject deterministic fakes but must never present fake history as live evidence. Do not start the product UI, paper execution/closure, pattern discovery, deployment, or cloud provisioning in this gate.
+Implement the Phase 5 interface only: replace the starter page with a responsive paper-trade intent form and result workspace for the existing tracer contract. Use a calm editorial utility style, native Tailwind/CSS, clear BLOCK/WARN/PASS hierarchy, keyboard and screen-reader support, and explicit loading, empty, fixture-preview, degraded, and unavailable states. Any fixture history must be visibly labelled as example data and must never look live. Do not add an unauthenticated API route or let a browser-supplied tenant ID reach service adapters. Do not start paper execution, closure, pattern generation, deployment, or cloud provisioning in this gate.
 
 ## Discipline
 1. Use strict test-driven development. Add one failing behavior test, run it and record the expected failure, implement the minimum code, then rerun targeted and full checks.

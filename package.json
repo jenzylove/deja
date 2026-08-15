@@ -10,6 +10,7 @@
     "test": "tsx --test test/*.test.ts",
     "test:rules": "tsx --test test/rules.test.ts",
     "test:intent": "tsx --test test/intent-service.test.ts",
+    "test:ui": "tsx --test test/intent-ui.test.ts",
     "verify:bedrock": "tsx scripts/verify-bedrock.ts",
     "verify:db": "tsx scripts/verify-db.ts",
     "verify:all": "npm run verify:bedrock && npm run verify:db",

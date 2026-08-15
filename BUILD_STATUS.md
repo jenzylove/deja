@@ -10,7 +10,7 @@
 - Product UI: default Next.js starter
 
 ## Active gate
-Phase 4 tracer bullet: validated trade intent through canonicalization, retrieval, deterministic rule evaluation, and structured grounded result. Live provider verification remains blocked while `.env.local` is absent.
+Phase 5 interface: responsive paper-trade intent form, grounded decision workspace, and honest fixture/degraded/unavailable states. The browser must not choose tenant identity and no unauthenticated service route may be introduced.
 
 ## Evidence log
 
@@ -674,3 +674,77 @@ Targeted GREEN:
 # pass 18
 # fail 0
 ```
+
+## Phase 5 interface gate
+
+Phase 5 baseline: `7f62493d55eec6d39a508198976c25af9cab3d87`.
+
+### RED - interface view model before production code
+
+Command: `npx tsx --test test/intent-ui.test.ts`
+
+```text
+Error: Cannot find module '../src/lib/intent-ui'
+# tests 1
+# pass 0
+# fail 1
+```
+
+Expected failure: the pure interface contract for closed field options, validation, honest workspace states, and fixture-labelled evidence did not exist.
+
+### GREEN - targeted interface suite
+
+Command: `npm run test:ui`
+
+```text
+# tests 7
+# pass 7
+# fail 0
+```
+
+The UI contract now verifies service-compatible enums, inline validation, distinct empty/loading/unavailable/degraded states, anecdote-safe fixture evidence, repeated fixture labels, rule evidence, filter-widening disclosure, and semantic win/loss outcome tones.
+
+### GREEN - Phase 5 verification
+
+```text
+npm test             39 passed, 0 failed
+npx tsc --noEmit     passed
+npm run lint         0 errors, 1 existing warning in scripts/check-memory.ts
+npm run build        passed, static / route generated
+npm audit --omit=dev found 0 vulnerabilities
+git diff --check     passed
+```
+
+Production-browser verification used local production Next.js servers at `127.0.0.1:3100` and `127.0.0.1:3000`. At the 1280px browser viewport, the form, inline error path, empty workspace, fail-closed unavailable result, and opted-in example result rendered without horizontal overflow or clipped controls. The example view visibly repeated fixture labels, distinguished WARN and PASS evidence, stated `n=3` without a percentage, disclosed filter widening, and offered the provider-unavailable fixture state. The CSS has explicit single-column fallbacks at 1060px and 720px, system dark tokens, visible focus treatment, and a reduced-motion override. Browser tooling did not expose viewport emulation, so the mobile fallback was verified from the responsive CSS and build rather than claimed as a device screenshot.
+
+Visual QA found one misleading style: a losing `-1.0R` example used the same accent color as positive outcomes. A regression test failed with `getOutcomeTone is not a function`, then passed after adding deterministic positive, negative, and neutral tone mapping and semantic CSS classes. That repair rerun passed 6/6 UI tests and 38/38 full tests.
+
+### Independent UI review FAIL and contract repair
+
+The frozen UI review reproduced two release blockers. The form omitted five fields required by `validateTradeIntent`, imposed a stricter thesis rule than the service, and briefly claimed to check service availability despite performing no check.
+
+Adversarial RED:
+
+```text
+npm run test:ui       7 tests, 5 passed, 2 failed
+UI-valid draft rejected by the existing service contract
+brief thesis rejected by UI but accepted by validateTradeIntent
+```
+
+The repair adds position size, entry, optional stop loss, optional take profit, and post-loss sizing to the draft and rendered form. `toTradeIntentInput` converts that draft to the exact service payload, and the test passes the converted payload through `validateTradeIntent`. Asset and asset class are no longer artificially closed to three crypto choices. UI validation now mirrors service semantics, including accepting any non-empty thesis. The fake loading state and animation-frame transition were removed. Valid submission goes directly to the honest unavailable BLOCK state.
+
+Repair GREEN:
+
+```text
+npm run test:ui       7 passed, 0 failed
+npm test              39 passed, 0 failed
+npx tsc --noEmit      passed
+npm run lint          0 errors, 1 existing warning
+npm run build         passed
+npm audit --omit=dev  0 vulnerabilities
+git diff --check      passed
+```
+
+Production-browser verification at `127.0.0.1:3000` confirmed the contract-complete form renders without clipping or horizontal overflow. The service-valid thesis `brief` transitioned directly to unavailable with no loading copy, no field errors, and zero `/api/` resources.
+
+No API route, tenant input, live provider request, credential access, paper execution, deployment, commit, or push was added or performed.
