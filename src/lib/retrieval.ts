@@ -29,6 +29,12 @@ export interface RetrievalQuery {
   regime: string;
 }
 
+export type SqlFallbackQuery = Omit<RetrievalQuery, "canonicalThesis" | "strategy">;
+
+export interface RetrievalDatabase {
+  query<T>(sql: string, values: unknown[]): Promise<{ rows: T[] }>;
+}
+
 export interface RetrievedTrade {
   intentId: string;
   tradeId: string | null;
@@ -110,6 +116,83 @@ const MIN_CANDIDATES = 12;
 const ANN_LIMIT = 25;
 const FINAL_LIMIT = 8;
 
+interface RawFallbackRow {
+  intent_id: string;
+  trade_id: string;
+  asset: string;
+  direction: string;
+  strategy: string | null;
+  session: string | null;
+  regime: string | null;
+  risk_pct: string | null;
+  confidence: string | null;
+  thesis_raw: string;
+  opened_at: string;
+  closed_at: string;
+  r_multiple: string | null;
+}
+
+/** Bedrock-independent degradation path. It intentionally contains neither an
+ * embedding call nor a vector expression. */
+export async function retrieveSqlFallback(
+  q: SqlFallbackQuery,
+  database: RetrievalDatabase = db(),
+): Promise<RetrievalResult> {
+  const started = Date.now();
+  const { rows } = await database.query<RawFallbackRow>(
+    `SELECT i.id AS intent_id, t.id AS trade_id, i.asset, i.direction, i.strategy,
+            i.session, i.regime, i.risk_pct, i.confidence, i.thesis_raw,
+            t.opened_at, t.closed_at, t.r_multiple
+       FROM trades t
+       JOIN trade_intents i ON i.id = t.intent_id
+      WHERE t.user_id = $1 AND i.user_id = $1
+        AND t.closed_at IS NOT NULL
+        AND i.direction = $2 AND i.asset_class = $3
+      ORDER BY t.closed_at DESC, t.id ASC
+      LIMIT 30`,
+    [q.userId, q.direction, q.assetClass],
+  );
+  const now = Date.now();
+  const trades: RetrievedTrade[] = rows.map((row) => {
+    const openedAt = new Date(row.opened_at);
+    const ageDays = Math.max(0, (now - openedAt.getTime()) / 86_400_000);
+    const rMultiple = row.r_multiple === null ? null : Number(row.r_multiple);
+    return {
+      intentId: row.intent_id,
+      tradeId: row.trade_id,
+      asset: row.asset,
+      direction: row.direction,
+      strategy: row.strategy,
+      session: row.session,
+      regime: row.regime,
+      riskPct: row.risk_pct === null ? null : Number(row.risk_pct),
+      confidence: row.confidence,
+      thesisRaw: row.thesis_raw,
+      openedAt,
+      closedAt: new Date(row.closed_at),
+      rMultiple,
+      win: rMultiple === null ? null : rMultiple > 0,
+      cosine: 0,
+      score: Math.pow(0.5, ageDays / RECENCY_HALF_LIFE),
+      ageDays: Math.round(ageDays),
+    };
+  });
+  const cohort = summarize(
+    trades
+      .filter((trade) => trade.win !== null)
+      .map((trade) => ({ win: trade.win as boolean, r: trade.rMultiple })),
+  );
+  return {
+    trades: trades.slice(0, FINAL_LIMIT),
+    cohort,
+    behaviour: await behaviouralState(q.userId, database),
+    filterUsed: "SQL fallback: same direction and asset class",
+    widened: false,
+    candidates: trades.length,
+    latencyMs: Date.now() - started,
+  };
+}
+
 function attributeOverlap(q: RetrievalQuery, r: {
   strategy: string | null; session: string | null; regime: string | null;
   asset: string; riskPct: number | null;
@@ -131,7 +214,6 @@ function attributeOverlap(q: RetrievalQuery, r: {
 
 export async function retrieve(q: RetrievalQuery): Promise<RetrievalResult> {
   const started = Date.now();
-  const pool = db();
   const vec = toVector(await embedQuery(q.canonicalThesis));
 
   // --- Stage 1 + 2: widen until the candidate pool is big enough to say
@@ -220,23 +302,27 @@ interface RawRow {
   distance: string;
 }
 
-async function annSearch(q: RetrievalQuery, level: Level, vec: string): Promise<RawRow[]> {
-  const extra = level.params(q);
-  // $1 is user_id, the vector is last. Level predicates use $2..$n.
-  const vecParam = `$${extra.length + 2}`;
-  const sql = `
+export function buildAnnSearchSql(levelSql: string, vecParam: string): string {
+  return `
     SELECT i.id AS intent_id, t.id AS trade_id, i.asset, i.direction, i.strategy,
            i.session, i.regime, i.risk_pct, i.confidence, i.thesis_raw,
            i.created_at AS opened_at, t.closed_at, t.r_multiple,
            i.thesis_embedding <=> ${vecParam} AS distance
       FROM trade_intents i
-      LEFT JOIN trades t ON t.intent_id = i.id
+      JOIN trades t ON t.intent_id = i.id AND t.user_id = $1
      WHERE i.user_id = $1
        AND i.thesis_embedding IS NOT NULL
        AND t.closed_at IS NOT NULL
-       AND ${level.sql}
+       AND ${levelSql}
      ORDER BY distance
      LIMIT ${ANN_LIMIT}`;
+}
+
+async function annSearch(q: RetrievalQuery, level: Level, vec: string): Promise<RawRow[]> {
+  const extra = level.params(q);
+  // $1 is user_id, the vector is last. Level predicates use $2..$n.
+  const vecParam = `$${extra.length + 2}`;
+  const sql = buildAnnSearchSql(level.sql, vecParam);
   const { rows } = await db().query<RawRow>(sql, [q.userId, ...extra, vec]);
   return rows;
 }
@@ -245,8 +331,10 @@ async function annSearch(q: RetrievalQuery, level: Level, vec: string): Promise<
  * The objective half of the evidence. None of this depends on the trader
  * telling the truth, or telling us anything at all.
  */
-export async function behaviouralState(userId: string): Promise<BehaviouralState> {
-  const pool = db();
+export async function behaviouralState(
+  userId: string,
+  pool: RetrievalDatabase = db(),
+): Promise<BehaviouralState> {
   const [lastLoss, today, streak, open, widened] = await Promise.all([
     pool.query<{ m: string | null }>(
       `SELECT extract(epoch FROM now() - max(closed_at)) / 60 AS m

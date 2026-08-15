@@ -10,7 +10,7 @@
 - Product UI: default Next.js starter
 
 ## Active gate
-Phase 3, deterministic rule DSL and BLOCK/WARN/PASS evaluation.
+Phase 4 tracer bullet: validated trade intent through canonicalization, retrieval, deterministic rule evaluation, and structured grounded result. Live provider verification remains blocked while `.env.local` is absent.
 
 ## Evidence log
 
@@ -365,3 +365,312 @@ Command: `npm run test:rules`
 ```
 
 The evaluator now treats malformed rules or state as unsafe and returns BLOCK regardless of untrusted warn enforcement, returns structured evidence instead of throwing, rejects non-finite runtime values, and freezes compiled rules and predicates.
+
+## Phase 4 service-layer tracer bullet
+
+Phase 4 baseline: `530e318d883cb02e48476781448dc9315168d2f2`.
+
+### RED — service tracer bullet before production code
+
+Command: `npx tsx --test --test-name-pattern="tracer bullet" test/intent-service.test.ts`
+
+```text
+TAP version 13
+# node:internal/modules/cjs/loader:1430
+#   const err = new Error(message);
+#               ^
+# Error: Cannot find module '../src/lib/intent-service'
+# Require stack:
+# - /root/deja/test/intent-service.test.ts
+#     at node:internal/modules/cjs/loader:1430:15
+#     at nextResolveSimple (/root/deja/node_modules/tsx/dist/register-C557imBs.cjs:10:1006)
+#     at /root/deja/node_modules/tsx/dist/register-C557imBs.cjs:9:4959
+#     at /root/deja/node_modules/tsx/dist/register-C557imBs.cjs:9:4261
+#     at resolveTsPaths (/root/deja/node_modules/tsx/dist/register-C557imBs.cjs:10:759)
+#     at /root/deja/node_modules/tsx/dist/register-C557imBs.cjs:10:1199
+#     at j._resolveFilename (file:///root/deja/node_modules/tsx/dist/register-C4vWVmug.mjs:2:17957)
+#     at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+#     at defaultResolve (node:internal/modules/cjs/loader:1075:31)
+#     at nextStep (node:internal/modules/customization_hooks:189:26) {
+#   code: 'MODULE_NOT_FOUND',
+#   requireStack: [ '/root/deja/test/intent-service.test.ts' ]
+# }
+# Node.js v22.23.1
+# Subtest: test/intent-service.test.ts
+not ok 1 - test/intent-service.test.ts
+  ---
+  duration_ms: 432.182435
+  type: 'test'
+  location: '/root/deja/test/intent-service.test.ts:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 447.751103
+```
+
+Expected failure: the service module did not exist, so the test could not traverse validation, canonicalization, retrieval, tenant rule loading, rule evaluation, and evidence-safe output.
+
+### Additional vertical-slice RED evidence
+
+Each failure was observed before its corresponding minimum production change.
+
+```text
+Command: npx tsx --test --test-name-pattern="unknown intent fields" test/intent-service.test.ts
+not ok 1 - validation rejects unknown intent fields before any adapter call
+error: The validation function is expected to return "true". Received false
+Caught error: Error: must not run
+# tests 1
+# pass 0
+# fail 1
+# duration_ms 831.032869
+
+Command: npx tsx --test --test-name-pattern="canonicalization failure" test/intent-service.test.ts
+not ok 1 - canonicalization failure still evaluates blocking rules without inventing evidence
+error: Bedrock unavailable
+# tests 1
+# pass 0
+# fail 1
+# duration_ms 813.620726
+
+Command: npx tsx --test --test-name-pattern="three most similar" test/intent-service.test.ts
+not ok 1 - anecdote output exposes only the three most similar raw episodes
+error: 4 !== 3
+# tests 1
+# pass 0
+# fail 1
+# duration_ms 1075.663107
+
+Command: npx tsx --test --test-name-pattern="production rule loader" test/intent-service.test.ts
+not ok 1 - production rule loader uses the tenant ID and active deterministic query
+error: '(0 , import_intent_service.loadActiveRulesForUser) is not a function'
+# tests 1
+# pass 0
+# fail 1
+# duration_ms 841.39436
+
+Command: npx tsx --test --test-name-pattern="non-UUID" test/intent-service.test.ts
+not ok 1 - validation rejects a non-UUID tenant identifier before adapters run
+error: Missing expected rejection.
+# tests 1
+# pass 0
+# fail 1
+# duration_ms 848.421404
+```
+
+### GREEN — targeted Phase 4 service suite
+
+Command: `npm run test:intent`
+
+```text
+> deja@0.1.0 test:intent
+> tsx --test test/intent-service.test.ts
+
+TAP version 13
+# Subtest: tracer bullet evaluates tenant rules and returns anecdote-safe grounded evidence
+ok 1 - tracer bullet evaluates tenant rules and returns anecdote-safe grounded evidence
+  ---
+  duration_ms: 5.431222
+  type: 'test'
+  ...
+# Subtest: validation rejects unknown intent fields before any adapter call
+ok 2 - validation rejects unknown intent fields before any adapter call
+  ---
+  duration_ms: 1.399812
+  type: 'test'
+  ...
+# Subtest: canonicalization failure still evaluates blocking rules without inventing evidence
+ok 3 - canonicalization failure still evaluates blocking rules without inventing evidence
+  ---
+  duration_ms: 0.917111
+  type: 'test'
+  ...
+# Subtest: anecdote output exposes only the three most similar raw episodes
+ok 4 - anecdote output exposes only the three most similar raw episodes
+  ---
+  duration_ms: 1.016296
+  type: 'test'
+  ...
+# Subtest: production rule loader uses the tenant ID and active deterministic query
+ok 5 - production rule loader uses the tenant ID and active deterministic query
+  ---
+  duration_ms: 0.821357
+  type: 'test'
+  ...
+# Subtest: validation rejects a non-UUID tenant identifier before adapters run
+ok 6 - validation rejects a non-UUID tenant identifier before adapters run
+  ---
+  duration_ms: 0.507897
+  type: 'test'
+  ...
+# Subtest: retrieval failure preserves deterministic rule enforcement
+ok 7 - retrieval failure preserves deterministic rule enforcement
+  ---
+  duration_ms: 0.804152
+  type: 'test'
+  ...
+# Subtest: unavailable tenant rules fail closed before retrieval
+ok 8 - unavailable tenant rules fail closed before retrieval
+  ---
+  duration_ms: 0.601906
+  type: 'test'
+  ...
+# Subtest: intent and retrieved behaviour populate every supported rule field
+ok 9 - intent and retrieved behaviour populate every supported rule field
+  ---
+  duration_ms: 1.348852
+  type: 'test'
+  ...
+# Subtest: signal-tier cohort includes its rate and interval
+ok 10 - signal-tier cohort includes its rate and interval
+  ---
+  duration_ms: 1.273438
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 953.798737
+```
+
+All adapter responses in this test are explicitly labelled deterministic test fixtures, not live provider evidence.
+
+### Final GREEN — complete available test suite
+
+Command: `npm test`
+
+```text
+> deja@0.1.0 test
+> tsx --test test/*.test.ts
+
+1..24
+# tests 24
+# suites 0
+# pass 24
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1159.656269
+```
+
+### Final GREEN — lint
+
+Command: `npm run lint`
+
+```text
+> deja@0.1.0 lint
+> eslint
+
+/root/deja/scripts/check-memory.ts
+  80:11  warning  'labelOk' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/root/deja/src/lib/retrieval.ts
+  134:9  warning  'pool' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 2 problems (0 errors, 2 warnings)
+```
+
+The two warnings are unchanged baseline warnings; Phase 4 adds no lint warning or error.
+
+### Final GREEN — production build
+
+Command: `npm run build`
+
+```text
+> deja@0.1.0 build
+> next build
+
+▲ Next.js 16.3.0 (Turbopack)
+✓ Running next.config.ts took 81ms
+  Creating an optimized production build ...
+✓ Compiled successfully in 926ms
+  Running TypeScript ...
+  Finished TypeScript in 6.6s ...
+  Collecting page data using 1 worker ...
+✓ Generating static pages using 1 worker (4/4) in 396ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+└ ○ /_not-found
+
+○  (Static)  prerendered as static content
+```
+
+### Final GREEN — production dependency audit
+
+Command: `npm audit --omit=dev`
+
+```text
+found 0 vulnerabilities
+```
+
+Live CockroachDB and Bedrock verification was not attempted: `.env.local` is absent and this gate prohibits credential reads, cloud calls, and external side effects.
+
+### Independent review FAIL and repair evidence
+
+The first Phase 4 diff was rejected after adversarial probes reproduced five release blockers: caller-selected tenant IDs, Bedrock starting before rules were available, canonicalization failure returning PASS without memory evidence, low-sample percentage leakage from an untrusted tier, and raw provider error leakage.
+
+Each repair was added test-first. The service now separates authenticated tenant context from the closed trade payload, loads and compiles rules before provider work, uses a tenant-scoped SQL-only fallback when canonicalization fails, derives evidence tier and intervals from validated counts, and returns fixed public stage messages.
+
+A final additional RED exposed a sixth unsafe branch:
+
+```text
+# tests 15
+# pass 14
+# fail 1
+retrieval failure without active rules: PASS !== BLOCK
+```
+
+The retrieval-failure branch was changed to preserve rule evidence while always blocking execution when memory evidence is unavailable.
+
+Final targeted GREEN:
+
+```text
+# tests 15
+# pass 15
+# fail 0
+```
+
+The targeted suite also directly verifies that SQL fallback uses the authenticated tenant ID in all six queries and contains no embedding, vector, or `<=>` operation.
+
+### Second independent review FAIL and repair evidence
+
+The second frozen review reproduced three additional blockers: normal retrieval could return PASS with zero episodes, malformed cohort counts escaped as an exception, and the vector query joined trades without independently constraining `trades.user_id`.
+
+Adversarial RED:
+
+```text
+# tests 18
+# pass 15
+# fail 3
+empty normal retrieval: complete/PASS instead of degraded/BLOCK
+malformed cohort: unhandled Invalid retrieval cohort
+vector SQL: tenant-scoped join builder absent
+```
+
+Repairs moved evidence validation inside the structured retrieval error boundary, force empty evidence to BLOCK, and constrain both `trade_intents.user_id` and `trades.user_id` in the ANN join.
+
+Targeted GREEN:
+
+```text
+# tests 18
+# pass 18
+# fail 0
+```

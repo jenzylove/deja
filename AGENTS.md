@@ -9,7 +9,7 @@ Deja is a paper-trading decision-memory layer. Preserve the locked scope in `doc
 - Do not edit another project.
 
 ## Current gate
-Implement Phase 3 only: deterministic rule DSL and BLOCK/WARN/PASS evaluation. Do not start UI, brief generation, execution, deployment, or cloud provisioning in this gate.
+Implement the Phase 4 tracer bullet only: validate one trade intent, canonicalize it through the existing Bedrock adapter, retrieve comparable memories through the existing CockroachDB adapter, evaluate active rules through `src/lib/rules.ts`, and return a structured grounded result. Production wiring must use the real adapters. Tests may inject deterministic fakes but must never present fake history as live evidence. Do not start the product UI, paper execution/closure, pattern discovery, deployment, or cloud provisioning in this gate.
 
 ## Discipline
 1. Use strict test-driven development. Add one failing behavior test, run it and record the expected failure, implement the minimum code, then rerun targeted and full checks.
@@ -29,4 +29,4 @@ Implement Phase 3 only: deterministic rule DSL and BLOCK/WARN/PASS evaluation. D
 - Build: `npm run build`
 
 ## Completion
-Gate passes only when the RED and GREEN evidence is recorded in `BUILD_STATUS.md`, all rule-engine tests pass, lint has no errors, production build passes, and the working diff contains only Phase 3 files.
+Gate passes only when the RED and GREEN evidence is recorded in `BUILD_STATUS.md`, all service and rule-engine tests pass, lint has no errors, production build passes, and the working diff contains only Phase 4 files.
