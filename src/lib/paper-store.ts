@@ -275,7 +275,7 @@ export class CockroachPaperStore
            JOIN trade_intents i ON i.id = t.intent_id AND i.user_id = $1
            CROSS JOIN LATERAL unnest(d.warnings_shown) AS shown(code)
           WHERE d.user_id = $1 AND t.closed_at IS NOT NULL AND t.r_multiple IS NOT NULL
-          ORDER BY shown.code, t.closed_at, t.id`, [userId]);
+          ORDER BY code, "tradeId"`, [userId]);
       const rows = capturedRows<Record<string, unknown>>(result, WARNING_FIELDS);
       if (rows.some((row) => !validUserId(row.tradeId) || !validString(row.code) ||
           row.shown !== true || typeof row.defied !== "boolean" ||
