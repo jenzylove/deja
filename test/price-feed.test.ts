@@ -7,7 +7,7 @@ import {
   defaultPriceFeed,
 } from "../src/lib/price-feed";
 
-function mockFetch(body: unknown, ok = true, status = 200): (input: string) => Promise<any> {
+function mockFetch(body: unknown, ok = true, status = 200): (input: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }> {
   return async () => ({ ok, status, json: async () => body });
 }
 
