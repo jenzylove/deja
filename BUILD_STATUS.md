@@ -1201,3 +1201,31 @@ git diff --check                                passed
 - No live CockroachDB/Bedrock; derived from in-memory/local stored activity until the persistence adapter is live.
 - Real authentication, recovery-state sweep, migration, deployment, and browser dogfood remain (later slices).
 - No deployment, credential access, dependency change, or cloud provisioning performed.
+
+## Release-readiness gate (local, pre-deployment)
+
+Branch: `feat/end-to-end-app` (unmerged to `main`). Kept on the branch, no main merge, no deployment.
+
+### Full battery (final pass)
+```text
+npm run test:paper         56 passed, 0 failed
+npm test                   154 passed, 0 failed
+npx tsc --noEmit            passed
+npm run lint               0 errors, 1 pre-existing warning in scripts/check-memory.ts
+npm run build              passed; 8 dynamic routes (intents, trades, close, monitor, events, settle, insights)
+npm audit --omit=dev       found 0 vulnerabilities
+git diff --check           passed
+secret scan                no key material in src/test/AGENTS/BUILD_STATUS
+```
+
+### Recovery / edge coverage verified by the suites
+Missing actor -> 503 before any work (intents, trades, insights); duplicate execute replays idempotently; duplicate close -> already_closed; close replay cannot overwrite outcome; cross-tenant isolation on execute/close/monitor/settle/events/insights; malformed JSON and oversize body rejected before the service; tenant identifier / decision / user_id injection from the body rejected everywhere; persistence- and price-feed-unavailable fail closed with zero writes; fills never fabricated (stop/target auto-close uses the resolved level); malformed adapter/price-feed/proxy output sanitized with zero trap execution; append-only events never mutated; anecdote cohorts never render an unsupported percentage.
+
+### Deployment blockers (require the user's authorization / credentials)
+- Real authentication is still a release blocker: the server binds one configured tenant via DEJA_ACTOR_MODE / DEJA_ACTOR_USER_ID. Requires an authenticated session resolver.
+- Persistence is the in-memory/local adapter; live CockroachDB needs connection configuration and a migration against a real or shared cluster.
+- Price feed is the fail-closed `unavailablePriceFeed`; real monitoring needs a feed/provider credential.
+- No cloud/hosting target provisioned; no public deployment; no migration run; no live end-to-end smoke test.
+
+### Decision
+Paused at the deployment authorization boundary awaiting the user's choice (merge to main vs deploy vs extend auth). No commits to `main`, no deployment, no credential access, no live DB, no dependency change.
