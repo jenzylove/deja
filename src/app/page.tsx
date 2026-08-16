@@ -931,39 +931,42 @@ export default function Home() {
             <fieldset>
               <legend className="sr-only">Paper-trade intent details</legend>
               <div className="form-grid">
-                <div className="field">
+                <div className="field asset-field">
                   <label htmlFor="asset">Asset</label>
                   <input id="asset" name="asset" value={draft.asset} onChange={(event) => update("asset", event.target.value)} placeholder="BTC" autoCapitalize="characters" aria-invalid={Boolean(errors.asset)} aria-describedby={errors.asset ? "asset-error" : undefined} />
                   {errors.asset ? <p className="field-error" id="asset-error">{errors.asset}</p> : null}
                 </div>
 
-                <div className="field">
-                  <label htmlFor="assetClass">Asset class</label>
-                  <input id="assetClass" name="assetClass" value={draft.assetClass} onChange={(event) => update("assetClass", event.target.value)} placeholder="crypto" aria-invalid={Boolean(errors.assetClass)} aria-describedby={errors.assetClass ? "assetClass-error" : undefined} />
-                  {errors.assetClass ? <p className="field-error" id="assetClass-error">{errors.assetClass}</p> : null}
-                </div>
-
                 <SelectField id="direction" label="Direction" value={draft.direction} options={FIELD_OPTIONS.direction} onChange={(value) => update("direction", value as IntentDraft["direction"])} />
-                <NumberField id="size" label="Position size" value={draft.size} onChange={(value) => update("size", value)} error={errors.size} helper="Paper position units." />
-                <NumberField id="entry" label="Entry" value={draft.entry} onChange={(value) => update("entry", value)} error={errors.entry} />
-                <NumberField id="stopLoss" label="Stop loss" value={draft.stopLoss} onChange={(value) => update("stopLoss", value)} error={errors.stopLoss} optional />
-                <NumberField id="takeProfit" label="Take profit" value={draft.takeProfit} onChange={(value) => update("takeProfit", value)} error={errors.takeProfit} optional />
+                <NumberField id="entry" label="Entry" value={draft.entry} onChange={(value) => update("entry", value)} error={errors.entry} helper="Your intended price. More options are below." />
                 <NumberField id="riskPct" label="Risk %" value={draft.riskPct} onChange={(value) => update("riskPct", value)} error={errors.riskPct} helper="Percent of paper account at risk." />
 
-                <SelectField id="confidence" label="Confidence" value={draft.confidence} options={FIELD_OPTIONS.confidence} onChange={(value) => update("confidence", value as IntentDraft["confidence"])} />
-                <SelectField id="session" label="Session" value={draft.session} options={FIELD_OPTIONS.session} onChange={(value) => update("session", value as IntentDraft["session"])} />
-                <SelectField id="regime" label="Regime" value={draft.regime} options={FIELD_OPTIONS.regime} onChange={(value) => update("regime", value as IntentDraft["regime"])} helper="Choose unknown when context is unclear." />
-
-                <div className="field">
-                  <label htmlFor="sizeIncreaseAfterLoss">Size increased after the last loss?</label>
-                  <select id="sizeIncreaseAfterLoss" name="sizeIncreaseAfterLoss" value={draft.sizeIncreaseAfterLoss ? "yes" : "no"} onChange={(event) => update("sizeIncreaseAfterLoss", event.target.value === "yes")}>
-                    <option value="no">No</option>
-                    <option value="yes">Yes</option>
-                  </select>
-                </div>
+                <details className="advanced">
+                  <summary>More trade options</summary>
+                  <div className="form-grid advanced-grid">
+                    <div className="field">
+                      <label htmlFor="assetClass">Asset class</label>
+                      <input id="assetClass" name="assetClass" value={draft.assetClass} onChange={(event) => update("assetClass", event.target.value)} placeholder="crypto" aria-invalid={Boolean(errors.assetClass)} aria-describedby={errors.assetClass ? "assetClass-error" : undefined} />
+                      {errors.assetClass ? <p className="field-error" id="assetClass-error">{errors.assetClass}</p> : null}
+                    </div>
+                    <NumberField id="size" label="Position size" value={draft.size} onChange={(value) => update("size", value)} error={errors.size} helper="Paper position units." />
+                    <NumberField id="stopLoss" label="Stop loss" value={draft.stopLoss} onChange={(value) => update("stopLoss", value)} error={errors.stopLoss} optional />
+                    <NumberField id="takeProfit" label="Take profit" value={draft.takeProfit} onChange={(value) => update("takeProfit", value)} error={errors.takeProfit} optional />
+                    <SelectField id="confidence" label="Confidence" value={draft.confidence} options={FIELD_OPTIONS.confidence} onChange={(value) => update("confidence", value as IntentDraft["confidence"])} />
+                    <SelectField id="session" label="Session" value={draft.session} options={FIELD_OPTIONS.session} onChange={(value) => update("session", value as IntentDraft["session"])} />
+                    <SelectField id="regime" label="Regime" value={draft.regime} options={FIELD_OPTIONS.regime} onChange={(value) => update("regime", value as IntentDraft["regime"])} helper="Choose unknown when context is unclear." />
+                    <div className="field">
+                      <label htmlFor="sizeIncreaseAfterLoss">Size increased after the last loss?</label>
+                      <select id="sizeIncreaseAfterLoss" name="sizeIncreaseAfterLoss" value={draft.sizeIncreaseAfterLoss ? "yes" : "no"} onChange={(event) => update("sizeIncreaseAfterLoss", event.target.value === "yes")}>
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                      </select>
+                    </div>
+                  </div>
+                </details>
 
                 <div className="field thesis-field">
-                  <label htmlFor="thesisRaw">Thesis</label>
+                  <label htmlFor="thesisRaw">Why this trade</label>
                   <textarea id="thesisRaw" name="thesisRaw" rows={4} value={draft.thesisRaw} onChange={(event) => update("thesisRaw", event.target.value)} aria-label="Thesis" placeholder="Why are you taking this trade?" aria-invalid={Boolean(errors.thesisRaw)} aria-describedby={errors.thesisRaw ? "thesisRaw-error" : "thesisRaw-help"} />
                   {errors.thesisRaw ? <p className="field-error" id="thesisRaw-error">{errors.thesisRaw}</p> : <p className="field-help" id="thesisRaw-help">Required. One sentence is enough - Deja keeps it attached to the outcome.</p>}
                 </div>

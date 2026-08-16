@@ -1187,3 +1187,32 @@ input, select, textarea { color: var(--ink); }
   .hero-steps .step-card { transition: none !important; }
   .insight-row { transition: none !important; }
 }
+
+/* Friction-free quick check: collapsible advanced options */
+.advanced {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 2px 14px 14px;
+  background: var(--surface-raised);
+}
+.advanced summary {
+  cursor: pointer;
+  padding: 12px 0 4px;
+  font-size: 0.84rem;
+  font-weight: 640;
+  color: var(--accent-strong);
+  list-style: none;
+}
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary::before { content: "▸ "; color: var(--accent-strong); }
+.advanced[open] summary::before { content: "▾ "; }
+.advanced[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 14px;
+}
+@media (max-width: 560px) {
+  .advanced-grid { grid-template-columns: 1fr; }
+}
