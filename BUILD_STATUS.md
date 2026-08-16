@@ -1055,3 +1055,41 @@ git diff --check                             passed
 
 ### Next slice
 Wire allowed paper execution (BLOCK/WARN/PASS -> decision record, trade state, manual closure, persisted outcome) and refreshed memory into the existing server route surfaces.
+
+## Slice 2: paper execution, decision recording, open-trade state, closure, persisted outcome, refreshed memory
+
+Branch: `feat/end-to-end-app`. Backend routes wired; UI execute/close wiring is the next sub-slice.
+
+### RED
+Command: `npx tsx --test test/trade-route.test.ts` (before route existed)
+Failed as expected: module `../src/lib/trade-route` was not found.
+
+### GREEN and verification
+```text
+npx tsx --test test/trade-route.test.ts      11 passed, 0 failed
+npm run test:paper                            56 passed, 0 failed
+npm test                                      117 passed, 0 failed
+npx tsc --noEmit --incremental false         passed
+npm run lint                                  0 errors, 1 pre-existing warning in scripts/check-memory.ts
+npm run build                                 passed; routes: ○ / , ○ /_not-found , ƒ /api/intents , ƒ /api/trades , ƒ /api/trades/close
+npm audit --omit=dev                          found 0 vulnerabilities
+git diff --check                              passed
+```
+
+### What changed
+- `src/lib/paper-store-memory.ts`: `MemoryPaperStore` implementing the existing paper store interfaces for local dev, tenant-scoped open/close/memory, deterministic rule-derived decisions reusing `compileRule`/`evaluateRules`, fail-closed `requireLive` guard, and a replay path so a retried execute resolves to the same trade.
+- `src/lib/trade-route.ts`: `POST /api/trades` (BLOCK -> 409, WARN needs explicit defiance, PASS executes; bounded body; zod-rejects any `decision`/`userId`), `GET /api/trades` (open trades), `POST /api/trades/close` (records fill/outcome/R and refreshes derived memory) plus `tradeErrorToResponse` sanitization. Deterministic intent identity for idempotent replay.
+- `src/app/api/trades/route.ts`, `src/app/api/trades/close/route.ts`: wired API routes with nodejs runtime.
+- `test/trade-route.test.ts`: 11 tests covering missing identity 503, PASS executes real state, BLOCK zero writes, WARN defiance, close+memory+lineage, duplicate execute replay, duplicate close already-closed, malformed close fill, cross-tenant close 404, persistence-failure sanitized, and browser-supplied decision/tenant override rejection.
+- Deleted `test/trade-sample.test.ts` and a debug scratch script.
+
+### Fixes applied by main agent (subagent hit budget before finishing)
+- `deterministicIntentId` produced non-RFC4122-variant UUIDs (`(x & 0x0f) | 0x8` can yield 8..f, but the variant nibble must be 8..b). Changed mask to `(x & 0x03) | 0x08`; all execute/close paths were failing `INVALID_REQUEST` on the strict UUID regex.
+- `computeClosure` required `durationS` as a safe integer; real sub-second manual closes produced fractional seconds. Relaxed to finite non-negative in `computeClosure` and `closePaperTrade` outcome validation.
+- Memory adapter `loadClosedOutcomes` returned `rMultiple` as a string while the domain parser requires a number. Return the stored number and skip null-R rows.
+- Removed unused `createHash` import and an unused route param; aligned close/GET call sites in tests.
+
+### Honest limitations
+- No UI wiring for execute/close/open-trade/refreshed-memory yet (next sub-slice).
+- No real authentication; no live CockroachDB/Bedrock; in-memory/local persistence only.
+- No browser dogfood, deployment, migration, credential access, or cloud provisioning performed.

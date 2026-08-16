@@ -308,7 +308,7 @@ export function computeClosure(
   const initialRisk = Math.abs(row.entryFill - row.initialStop) * row.size;
   if (!Number.isFinite(initialRisk) || initialRisk <= 0) throw new PaperTradeError("INVALID_INITIAL_RISK");
   const durationS = (new Date(closedAt).getTime() - new Date(row.openedAt).getTime()) / 1000;
-  if (!Number.isSafeInteger(durationS) || durationS < 0) throw new PaperTradeError("INVALID_REQUEST");
+  if (!Number.isFinite(durationS) || durationS < 0) throw new PaperTradeError("INVALID_REQUEST");
   const direction = row.direction === "long" ? 1 : -1;
   const pnl = (exitFill - row.entryFill) * row.size * direction;
   const rMultiple = pnl / initialRisk;
@@ -345,7 +345,7 @@ export async function closePaperTrade(
         Object.keys(captured).some((key) => !CLOSED_OUTCOME_FIELDS.has(key)) ||
         !uuid(captured.tradeId) || !uuid(captured.intentId) || typeof captured.pnl !== "number" || !Number.isFinite(captured.pnl) ||
         typeof captured.rMultiple !== "number" || !Number.isFinite(captured.rMultiple) ||
-        typeof captured.durationS !== "number" || !Number.isSafeInteger(captured.durationS) ||
+        typeof captured.durationS !== "number" || !Number.isFinite(captured.durationS) ||
         !positive(captured.exitFill) || !EXIT_REASONS.includes(captured.exitReason as ExitReason)) {
       throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
     }
