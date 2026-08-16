@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   EXAMPLE_RESULT,
@@ -492,6 +492,30 @@ function ClosedOutcomeView({ closed }: { closed: CloseTradeApiSuccess }) {
   );
 }
 
+function Reveal({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [shown, setShown] = useState(false);
+  const reduceMotion = typeof window !== "undefined"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reduceMotion) return;
+    const io = new IntersectionObserver(
+      (entries) => entries.forEach((e) => e.isIntersecting && setShown(true)),
+      { threshold: 0.12 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [reduceMotion]);
+  const visible = shown || reduceMotion;
+  return (
+    <div ref={ref} className={`reveal ${visible ? "in" : ""} ${className}`}>
+      {children}
+    </div>
+  );
+}
+
 function InsightsSection() {
   const [insights, setInsights] = useState<InsightsState>({ kind: "loading" });
 
@@ -877,22 +901,23 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="hero" aria-labelledby="hero-title">
-        <p className="hero-kicker">A trader’s decision memory</p>
-        <h1 id="hero-title">Pause before the trade. Remember how it went.</h1>
-        <p className="hero-lead">
-          Deja is a paper-trading workspace. You state a setup in your own words, it checks your
-          personal rules and comparable history, gives you a clear BLOCK, WARN, or PASS — and then
-          remembers the simulated outcome so your next decision is grounded in what actually happened,
-          not just this week’s hot take.
-        </p>
-        <div className="hero-steps" aria-label="How Deja works">
-          <div><strong>State the setup</strong><span>Asset, direction, risk, and the thesis in your own words.</span></div>
-          <div><strong>Get a grounded check</strong><span>Deterministic rule results and comparable decisions — no hidden reasoning.</span></div>
-          <div><strong>Paper trade it</strong><span>Execute a simulated fill, close it, and watch the outcome feed your Trading DNA.</span></div>
-        </div>
-        <p className="hero-note">Paper only by design: positions are simulated, no real orders are routed, and no real capital is at risk.</p>
-      </section>
+      <Reveal className="app-reveal">
+        <section className="hero" aria-labelledby="hero-title">
+          <p className="hero-kicker">A trader’s decision memory</p>
+          <h1 id="hero-title">Pause before the trade. Remember how it went.</h1>
+          <p className="hero-lead">
+            Deja is a paper-trading workspace. You state a setup you’re considering, it checks your
+            personal rules and comparable history, gives you a clear BLOCK, WARN, or PASS, then
+            remembers the simulated outcome so your next decision is grounded in what actually happened.
+          </p>
+          <div className="hero-steps" aria-label="How Deja works">
+            <div className="step-card"><strong>You’re considering a trade</strong><span>Asset, direction, and one line on why you are taking it.</span></div>
+            <div className="step-card"><strong>Deja checks it</strong><span>Your own rules and comparable outcomes, fast, no essay.</span></div>
+            <div className="step-card"><strong>Simulate it</strong><span>Paper fill and close, logged to your Trading DNA.</span></div>
+          </div>
+          <p className="hero-note">Paper simulator. Real orders are never routed and no real capital is at risk.</p>
+        </section>
+      </Reveal>
 
       <div className="workspace-grid">
         <section className="intent-panel" aria-labelledby="intent-heading">
@@ -939,8 +964,8 @@ export default function Home() {
 
                 <div className="field thesis-field">
                   <label htmlFor="thesisRaw">Thesis</label>
-                  <textarea id="thesisRaw" name="thesisRaw" rows={5} value={draft.thesisRaw} onChange={(event) => update("thesisRaw", event.target.value)} placeholder="What changed, what confirms it, and what would make the idea wrong?" aria-invalid={Boolean(errors.thesisRaw)} aria-describedby={errors.thesisRaw ? "thesisRaw-error" : "thesisRaw-help"} />
-                  {errors.thesisRaw ? <p className="field-error" id="thesisRaw-error">{errors.thesisRaw}</p> : <p className="field-help" id="thesisRaw-help">Required. Your words stay attached to the decision record.</p>}
+                  <textarea id="thesisRaw" name="thesisRaw" rows={4} value={draft.thesisRaw} onChange={(event) => update("thesisRaw", event.target.value)} aria-label="Thesis" placeholder="Why are you taking this trade?" aria-invalid={Boolean(errors.thesisRaw)} aria-describedby={errors.thesisRaw ? "thesisRaw-error" : "thesisRaw-help"} />
+                  {errors.thesisRaw ? <p className="field-error" id="thesisRaw-error">{errors.thesisRaw}</p> : <p className="field-help" id="thesisRaw-help">Required. One sentence is enough - Deja keeps it attached to the outcome.</p>}
                 </div>
               </div>
             </fieldset>
@@ -997,7 +1022,7 @@ export default function Home() {
         </aside>
       </div>
 
-      <InsightsSection />
+      <Reveal className="app-reveal"><InsightsSection /></Reveal>
 
       <footer className="footer-note">
         <p>Decision support for paper trading. Deja does not predict markets or route real orders.</p>

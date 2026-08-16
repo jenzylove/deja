@@ -1150,3 +1150,40 @@ fieldset:disabled {
 .tier-badge { color: var(--violet); }
 
 input, select, textarea { color: var(--ink); }
+
+/* ---- Animations (moves on scroll; honors reduced motion) ---- */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.reveal.in { opacity: 1; transform: none; }
+
+.workspace-grid {
+  animation: appRise 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+}
+@keyframes appRise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+.hero-steps .step-card {
+  transition: transform 0.25s ease, border-color 0.25s ease, background-color 0.25s ease;
+}
+.hero-steps .step-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.09);
+}
+
+.insight-row {
+  transition: background-color 0.18s ease;
+}
+.insight-row:hover { background: #f6f2e9; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .workspace-grid { animation: none !important; }
+  .hero-steps .step-card { transition: none !important; }
+  .insight-row { transition: none !important; }
+}
