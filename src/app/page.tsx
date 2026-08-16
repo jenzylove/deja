@@ -8,9 +8,11 @@ import {
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
+  interpretIntentApiResponse,
+  toTradeIntentInput,
   type IntentDraft,
   type IntentErrors,
-  type WorkspaceState,
+  type IntentSubmissionState,
 } from "@/lib/intent-ui";
 
 const INITIAL_DRAFT: IntentDraft = {
@@ -121,6 +123,132 @@ function DecisionMark({ decision }: { decision: "BLOCK" | "WARN" | "PASS" }) {
   return <span className={`decision decision-${decision.toLowerCase()}`}>{decision}</span>;
 }
 
+function LoadingWorkspace() {
+  const view = getWorkspaceView("loading");
+  return (
+    <div className="empty-state" role="status" aria-live="polite">
+      <span className="empty-index" aria-hidden="true">…</span>
+      <div>
+        <h2>{view.title}</h2>
+        <p>{view.detail}</p>
+      </div>
+    </div>
+  );
+}
+
+function ValidationWorkspace({ message }: { message: string }) {
+  const view = getWorkspaceView("validation_error");
+  return (
+    <div className="unavailable-state" role="alert">
+      <h2>{view.title}</h2>
+      <p>{message}</p>
+      <div className="recovery-note">
+        <strong>Recovery</strong>
+        <span>{view.recovery}</span>
+      </div>
+    </div>
+  );
+}
+
+function LiveWorkspace({ result }: {
+  result: Extract<IntentSubmissionState, { kind: "result" }>["result"];
+}) {
+  const cohort = result.retrieval?.cohort;
+  return (
+    <div className="example-result">
+      <section className="result-overview" aria-labelledby="live-result-title">
+        <div className="result-heading">
+          <DecisionMark decision={result.decision} />
+          <span className="source-label">
+            {result.state === "complete" ? "SERVER RESULT" : "SERVER DEGRADED RESULT"}
+          </span>
+        </div>
+        <h2 id="live-result-title">Decision result</h2>
+        <p>
+          {result.state === "complete"
+            ? "The configured tenant’s rules and retrieved memory were evaluated by the server."
+            : "The server returned a degraded decision with limited evidence."}
+        </p>
+        {result.errors.map((error) => (
+          <p className="field-error" key={error.stage}>{error.message}</p>
+        ))}
+      </section>
+
+      {result.canonicalThesis ? (
+        <section aria-labelledby="canonical-title">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Canonical thesis</p>
+              <h3 id="canonical-title">{titleCase(result.canonicalThesis.strategy)}</h3>
+            </div>
+            <span className="source-label">SERVER OUTPUT</span>
+          </div>
+          <p>{result.canonicalThesis.canonical}</p>
+        </section>
+      ) : null}
+
+      {result.retrieval && cohort ? (
+        <section className="cohort-block" aria-labelledby="live-cohort-title">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Evidence tier</p>
+              <h3 id="live-cohort-title">{titleCase(cohort.tier)}, n={cohort.n}</h3>
+            </div>
+            <span className="source-label">TENANT MEMORY</span>
+          </div>
+          <p>{cohort.caveat}</p>
+          {cohort.tier !== "anecdote" ? (
+            <p>
+              Win rate {(cohort.percentage * 100).toFixed(1)}% (n={cohort.n}), Wilson 95% interval {cohort.interval.low.toFixed(2)}–{cohort.interval.high.toFixed(2)}.
+            </p>
+          ) : null}
+          <div className="filter-note">
+            <strong>{result.retrieval.filter.widened ? "Filter widened" : "Retrieval filter"}</strong>
+            <p>{result.retrieval.filter.used}</p>
+            <span>{result.retrieval.filter.candidates} candidates reviewed</span>
+          </div>
+          <div className="episode-list">
+            {result.retrieval.episodes.map((episode) => (
+              <article className="episode" key={episode.intentId}>
+                <div className="episode-meta">
+                  <span>{episode.asset} {episode.direction}</span>
+                  <strong className={`outcome-${getOutcomeTone(String(episode.rMultiple ?? 0))}`}>
+                    {episode.rMultiple === null ? "Outcome unavailable" : `${episode.rMultiple}R`}
+                  </strong>
+                </div>
+                <blockquote>“{episode.thesisRaw}”</blockquote>
+                <span className="source-label">TENANT MEMORY · {episode.intentId}</span>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section aria-labelledby="live-rules-title">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Deterministic checks</p>
+            <h3 id="live-rules-title">Rule evidence</h3>
+          </div>
+          <span className="source-label">SERVER EVALUATION</span>
+        </div>
+        {result.rules.evidence.length === 0 ? <p>No active rules were returned.</p> : null}
+        <div className="rule-list">
+          {result.rules.evidence.map((rule) => (
+            <article className="rule-row" key={rule.ruleId}>
+              <DecisionMark decision={rule.passed ? "PASS" : rule.enforcement === "block" ? "BLOCK" : "WARN"} />
+              <div className="rule-copy">
+                <strong>{rule.ruleId}</strong>
+                <p>{rule.field}: {rule.actual === undefined ? "unavailable" : String(rule.actual)} {rule.operator} {rule.expected === undefined ? "unavailable" : String(rule.expected)}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function EmptyWorkspace() {
   const view = getWorkspaceView("empty");
   return (
@@ -134,16 +262,16 @@ function EmptyWorkspace() {
   );
 }
 
-function UnavailableWorkspace({ onExample }: { onExample: () => void }) {
+function UnavailableWorkspace({ message, onExample }: { message: string; onExample: () => void }) {
   const view = getWorkspaceView("unavailable");
   return (
     <div className="unavailable-state" role="alert">
       <div className="result-heading">
         <DecisionMark decision="BLOCK" />
-        <span className="source-label">LOCAL INTERFACE STATE</span>
+        <span className="source-label">SERVER UNAVAILABLE</span>
       </div>
       <h2>{view.title}</h2>
-      <p>{view.detail}</p>
+      <p>{message}</p>
       <div className="recovery-note">
         <strong>Recovery</strong>
         <span>{view.recovery}</span>
@@ -281,25 +409,39 @@ function ExampleWorkspace({ onDegraded }: { onDegraded: () => void }) {
 export default function Home() {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [errors, setErrors] = useState<IntentErrors>({});
-  const [workspace, setWorkspace] = useState<WorkspaceState>("empty");
+  const [submission, setSubmission] = useState<IntentSubmissionState>({ kind: "empty" });
 
   function update<K extends keyof IntentDraft>(field: K, value: IntentDraft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
   }
 
-  function submitIntent(event: FormEvent<HTMLFormElement>) {
+  async function submitIntent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextErrors = getIntentErrors(draft);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
-      setWorkspace("empty");
+      setSubmission({ kind: "empty" });
       const first = Object.keys(nextErrors)[0];
       document.getElementById(first)?.focus();
       return;
     }
 
-    setWorkspace("unavailable");
+    setSubmission({ kind: "loading" });
+    try {
+      const response = await fetch("/api/intents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(toTradeIntentInput(draft)),
+      });
+      const body: unknown = await response.json();
+      setSubmission(interpretIntentApiResponse(response.status, body));
+    } catch {
+      setSubmission({
+        kind: "unavailable",
+        message: "The decision service could not be reached.",
+      });
+    }
   }
 
   return (
@@ -367,10 +509,10 @@ export default function Home() {
             </fieldset>
 
             <div className="form-actions">
-              <button className="primary-button" type="submit">
-                Check paper intent
+              <button className="primary-button" type="submit" disabled={submission.kind === "loading"}>
+                {submission.kind === "loading" ? "Checking intent…" : "Check paper intent"}
               </button>
-              <p>No authenticated API is connected in this gate. Submission will fail closed.</p>
+              <p>Tenant identity is resolved only on the server. Per-user authentication is not implemented yet.</p>
             </div>
           </form>
         </section>
@@ -378,13 +520,27 @@ export default function Home() {
         <aside className="result-panel" aria-label="Decision result workspace">
           <div className="result-panel-header">
             <span>Decision workspace</span>
-            <span aria-live="polite">{workspace === "example" ? "Fixture preview" : workspace === "degraded" ? "Fixture degraded" : titleCase(workspace)}</span>
+            <span aria-live="polite">
+              {submission.kind === "example" ? "Fixture preview" : submission.kind === "degraded" ? "Fixture degraded" : titleCase(submission.kind)}
+            </span>
           </div>
           <div className="result-panel-body">
-            {workspace === "empty" ? <EmptyWorkspace /> : null}
-            {workspace === "unavailable" ? <UnavailableWorkspace onExample={() => setWorkspace("example")} /> : null}
-            {workspace === "example" ? <ExampleWorkspace onDegraded={() => setWorkspace("degraded")} /> : null}
-            {workspace === "degraded" ? <DegradedWorkspace onReturn={() => setWorkspace("example")} /> : null}
+            {submission.kind === "empty" ? <EmptyWorkspace /> : null}
+            {submission.kind === "loading" ? <LoadingWorkspace /> : null}
+            {submission.kind === "result" ? <LiveWorkspace result={submission.result} /> : null}
+            {submission.kind === "validation_error" ? <ValidationWorkspace message={submission.message} /> : null}
+            {submission.kind === "unavailable" ? (
+              <UnavailableWorkspace
+                message={submission.message}
+                onExample={() => setSubmission({ kind: "example" })}
+              />
+            ) : null}
+            {submission.kind === "example" ? (
+              <ExampleWorkspace onDegraded={() => setSubmission({ kind: "degraded" })} />
+            ) : null}
+            {submission.kind === "degraded" ? (
+              <DegradedWorkspace onReturn={() => setSubmission({ kind: "example" })} />
+            ) : null}
           </div>
         </aside>
       </div>

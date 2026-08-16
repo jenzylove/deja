@@ -1018,3 +1018,40 @@ git diff --check                           passed
 ```
 
 No live CockroachDB query, provider/API/UI call, credential access, dependency change, deployment, commit, or push was performed.
+
+## End-to-end tracer slice (browser -> server route -> real decision service)
+
+Branch: `feat/end-to-end-app`. First wiring under the improved end-to-end contract.
+
+### RED
+Command: `npx tsx --test test/intent-route.test.ts` (before route existed)
+Failed as expected: module `../src/lib/intent-route` was not found.
+
+### GREEN and verification
+```text
+npx tsx --test test/intent-route.test.ts test/server-actor.test.ts test/intent-ui.test.ts   18 passed, 0 failed
+npm run test:paper                           56 passed, 0 failed
+npm test                                     106 passed, 0 failed
+npx tsc --noEmit --incremental false         passed
+npm run lint                                 0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build                                passed; routes: ○ / , ○ /_not-found , ƒ /api/intents
+npm audit --omit=dev                         found 0 vulnerabilities
+git diff --check                             passed
+```
+
+### What changed
+- `src/lib/server-actor.ts`: server-only, fail-closed configured-single-tenant actor resolver. Accepts no Request/headers/query/body/cookie and never accepts a browser-supplied `user_id`. Missing or non-UUID config returns no actor -> route 503s before touching the service. Explicitly documented as a temporary boundary; real authenticated session resolution remains a release blocker.
+- `src/lib/intent-route.ts`: `POST /api/intents` with actor resolution first, bounded body (16 KB), JSON parse guard, schema-validated input, sanitized service output via zod `publicResult`, and fail-closed errors (`validation_error` 400, `unavailable` 503, oversized 413). Dynamic service route; no `user_id` accepted from the client.
+- `src/app/api/intents/route.ts`: wires production dependencies, `runtime=nodejs`, `dynamic=force-dynamic`.
+- `src/lib/intent-ui.ts` / `src/app/page.tsx`: submit handler `fetch("/api/intents")` on real submit; loading/result/validation_error/unavailable states; example and degraded fixtures remain explicitly labeled `example` / `Fixture preview` and are never shown as the submit result.
+- `test/intent-route.test.ts`, `test/server-actor.test.ts`, `test/intent-ui.test.ts`: 18 tests covering trusted-context success, body `user_id`/unknown field rejection, missing-identity 503 before service, malformed JSON/oversize, malformed service output sanitization, BLOCK/WARN/PASS integrity, and UI fail-closed states.
+- `.env.example` updated with `DEJA_ACTOR_MODE` / `DEJA_ACTOR_USER_ID` placeholders.
+
+### Honest limitations (release blockers, not addressed in this slice)
+- No real authentication: actor is bound from server config to one tenant.
+- No live CockroachDB or Bedrock; persistence and retrieval remain in-memory/test adapters where applicable.
+- No execution/closure/monitoring/DNA/audit wiring yet; only the intent decision route is live.
+- No browser dogfood, deployment, migration, credential access, or cloud provisioning performed.
+
+### Next slice
+Wire allowed paper execution (BLOCK/WARN/PASS -> decision record, trade state, manual closure, persisted outcome) and refreshed memory into the existing server route surfaces.

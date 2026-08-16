@@ -7,6 +7,7 @@ import {
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
+  interpretIntentApiResponse,
   toTradeIntentInput,
   type IntentDraft,
 } from "../src/lib/intent-ui";
@@ -67,13 +68,13 @@ test("a UI-valid draft converts to the exact existing service contract", () => {
   assert.equal(validated.sizeIncreaseAfterLoss, false);
 });
 
-test("workspace states distinguish empty and unavailable service access without a fake loading check", () => {
+test("workspace states distinguish empty and unavailable service access", () => {
   assert.match(getWorkspaceView("empty").title, /decision check/i);
   const unavailable = getWorkspaceView("unavailable");
   assert.equal(unavailable.decision, "BLOCK");
-  assert.match(unavailable.detail, /authenticated intent API is not available/i);
+  assert.match(unavailable.detail, /could not return/i);
   assert.ok(unavailable.recovery);
-  assert.match(unavailable.recovery!, /review the example fixture/i);
+  assert.match(unavailable.recovery!, /server identity and provider configuration/i);
 });
 
 test("example result repeatedly and visibly identifies fixture data", () => {
@@ -99,4 +100,79 @@ test("example outcomes use semantic tones instead of presenting losses as wins",
   assert.equal(getOutcomeTone("+0.8R"), "positive");
   assert.equal(getOutcomeTone("-1.0R"), "negative");
   assert.equal(getOutcomeTone("0R"), "neutral");
+});
+
+test("real API responses map to distinct success, validation, and unavailable states", () => {
+  const liveResult = {
+    state: "complete",
+    decision: "WARN",
+    errors: [],
+    canonicalThesis: {
+      strategy: "breakout_retest",
+      signals: ["retest holding"],
+      marketThesis: "continuation",
+      confirmationStated: true,
+      canonical: "breakout retest; retest holding; expecting continuation",
+    },
+    retrieval: {
+      evidenceTier: "anecdote",
+      episodes: [{
+        intentId: "intent-1",
+        tradeId: "trade-1",
+        asset: "BTC",
+        direction: "long",
+        strategy: "breakout_retest",
+        session: "ny",
+        regime: "trending",
+        riskPct: 1,
+        confidence: "high",
+        thesisRaw: "Range high held on the retest.",
+        openedAt: "2026-08-01T12:00:00.000Z",
+        closedAt: "2026-08-01T18:00:00.000Z",
+        rMultiple: 1,
+        win: true,
+      }],
+      cohort: { tier: "anecdote", n: 1, caveat: "Only one comparable episode." },
+      filter: { used: "same direction and strategy", widened: false, candidates: 1 },
+    },
+    behaviour: {
+      minutesSinceLastLoss: null,
+      tradesToday: 0,
+      lossStreak: 0,
+      openPositions: 0,
+      stopWidenedLast30d: 0,
+    },
+    rules: { evidence: [] },
+  };
+
+  const success = interpretIntentApiResponse(200, liveResult);
+  assert.equal(success.kind, "result");
+  assert.equal(success.kind === "result" ? success.result.decision : null, "WARN");
+
+  const validation = interpretIntentApiResponse(400, {
+    state: "validation_error",
+    message: "Invalid trade intent.",
+    issues: ["unknown field: user_id"],
+  });
+  assert.deepEqual(validation, {
+    kind: "validation_error",
+    message: "Invalid trade intent.",
+  });
+
+  const unavailable = interpretIntentApiResponse(503, {
+    state: "unavailable",
+    message: "Trusted server identity is unavailable.",
+  });
+  assert.deepEqual(unavailable, {
+    kind: "unavailable",
+    message: "Trusted server identity is unavailable.",
+  });
+});
+
+test("malformed API success output fails closed in the UI contract", () => {
+  assert.deepEqual(
+    interpretIntentApiResponse(200, { state: "complete", decision: "ALLOW" }),
+    { kind: "unavailable", message: "The decision response was invalid." },
+  );
+  assert.match(getWorkspaceView("loading").detail, /server decision service/i);
 });
