@@ -963,3 +963,58 @@ fieldset:disabled {
   letter-spacing: 0.05em;
   color: #8a7a5a;
 }
+
+/* Landing hero */
+.hero {
+  max-width: 60rem;
+  margin: 3rem auto 0;
+  padding: 0 1.5rem;
+}
+.hero-kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #8a7a5a;
+}
+.hero h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  max-width: 22ch;
+}
+.hero-lead {
+  margin: 0 0 1.5rem;
+  font-size: 1.08rem;
+  line-height: 1.6;
+  max-width: 52ch;
+  color: #4a4237;
+}
+.hero-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.hero-steps > div {
+  border: 1px solid #ece7df;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.hero-steps strong { font-size: 0.95rem; }
+.hero-steps span { font-size: 0.88rem; color: #6f665c; line-height: 1.45; }
+.hero-note {
+  font-size: 0.86rem;
+  color: #8a7a5a;
+  margin: 0;
+}
+.auth-note {
+  margin-top: 0.9rem;
+}
+@media (max-width: 720px) {
+  .hero-steps { grid-template-columns: 1fr; }
+}

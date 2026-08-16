@@ -872,17 +872,34 @@ export default function Home() {
           <span className="product-label">Paper decision memory</span>
         </div>
         <div className="mode-note">
-          <span>Paper only</span>
-          <span>No orders routed</span>
+          <span>Paper simulator</span>
+          <span>No real orders · no real capital</span>
         </div>
       </header>
+
+      <section className="hero" aria-labelledby="hero-title">
+        <p className="hero-kicker">A trader’s decision memory</p>
+        <h1 id="hero-title">Pause before the trade. Remember how it went.</h1>
+        <p className="hero-lead">
+          Deja is a paper-trading workspace. You state a setup in your own words, it checks your
+          personal rules and comparable history, gives you a clear BLOCK, WARN, or PASS — and then
+          remembers the simulated outcome so your next decision is grounded in what actually happened,
+          not just this week’s hot take.
+        </p>
+        <div className="hero-steps" aria-label="How Deja works">
+          <div><strong>State the setup</strong><span>Asset, direction, risk, and the thesis in your own words.</span></div>
+          <div><strong>Get a grounded check</strong><span>Deterministic rule results and comparable decisions — no hidden reasoning.</span></div>
+          <div><strong>Paper trade it</strong><span>Execute a simulated fill, close it, and watch the outcome feed your Trading DNA.</span></div>
+        </div>
+        <p className="hero-note">Paper only by design: positions are simulated, no real orders are routed, and no real capital is at risk.</p>
+      </section>
 
       <div className="workspace-grid">
         <section className="intent-panel" aria-labelledby="intent-heading">
           <div className="panel-heading">
             <p className="section-kicker">New intent</p>
-            <h1 id="intent-heading">Pause before the trade.</h1>
-            <p>State the setup. Deja checks personal rules and comparable decisions before any paper action.</p>
+            <h1 id="intent-heading">What are you setting up?</h1>
+            <p>Fill in the setup and thesis. Deja checks your rules and comparable decisions before any paper action.</p>
           </div>
 
           <form onSubmit={submitIntent} noValidate>
@@ -932,7 +949,7 @@ export default function Home() {
               <button className="primary-button" type="submit" disabled={submission.kind === "loading"}>
                 {submission.kind === "loading" ? "Checking intent…" : "Check paper intent"}
               </button>
-              <p>Tenant identity is resolved only on the server. Per-user authentication is not implemented yet.</p>
+              <p className="field-help auth-note">Signed in as a single server-bound account. Multi-user login is the next milestone; nothing in this form ever chooses who you are.</p>
             </div>
           </form>
         </section>
