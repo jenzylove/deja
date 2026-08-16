@@ -5,14 +5,22 @@ import { FormEvent, useState } from "react";
 import {
   EXAMPLE_RESULT,
   FIELD_OPTIONS,
+  buildClosePayload,
+  buildExecutePayload,
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
+  interpretCloseApiResponse,
   interpretIntentApiResponse,
+  interpretTradeApiResponse,
   toTradeIntentInput,
+  warningsShownFromResult,
+  type CloseTradeApiSuccess,
+  type ExecuteTradeApiSuccess,
   type IntentDraft,
   type IntentErrors,
   type IntentSubmissionState,
+  type WarningCode,
 } from "@/lib/intent-ui";
 
 const INITIAL_DRAFT: IntentDraft = {
@@ -249,6 +257,235 @@ function LiveWorkspace({ result }: {
   );
 }
 
+type TradeFlowState =
+  | { kind: "idle" }
+  | { kind: "executing" }
+  | { kind: "open"; execution: ExecuteTradeApiSuccess }
+  | { kind: "blocked"; message: string }
+  | { kind: "validation_error"; message: string }
+  | { kind: "unavailable"; message: string }
+  | { kind: "closing"; execution: ExecuteTradeApiSuccess }
+  | { kind: "closed"; closed: CloseTradeApiSuccess }
+  | { kind: "close_error"; message: string; execution: ExecuteTradeApiSuccess };
+
+function formatPrice(value: number) {
+  return Number.isFinite(value) ? value.toLocaleString("en-US", { maximumFractionDigits: 6 }) : String(value);
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  if (minutes === 0) return `${rest}s`;
+  return `${minutes}m ${rest}s`;
+}
+
+function WarningChecklist({
+  shown,
+  defied,
+  onToggle,
+}: {
+  shown: readonly WarningCode[];
+  defied: readonly WarningCode[];
+  onToggle: (code: WarningCode) => void;
+}) {
+  return (
+    <fieldset className="warning-checklist">
+      <legend>Advisory warnings shown — mark each one you are knowingly defying.</legend>
+      {shown.map((code) => (
+        <label className="warning-option" key={code}>
+          <input
+            type="checkbox"
+            checked={defied.includes(code)}
+            onChange={() => onToggle(code)}
+          />
+          <span>{code}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function OpenTradeView({ trade }: { trade: ExecuteTradeApiSuccess["trade"] }) {
+  return (
+    <dl className="evidence-grid">
+      <div><dt>Trade</dt><dd>{trade.id}</dd></div>
+      <div><dt>Asset</dt><dd>{trade.asset}</dd></div>
+      <div><dt>Direction</dt><dd>{trade.direction}</dd></div>
+      <div><dt>Size</dt><dd>{trade.size}</dd></div>
+      <div><dt>Entry</dt><dd>{formatPrice(trade.entry)}</dd></div>
+      <div><dt>Stop</dt><dd>{trade.stop === null ? "—" : formatPrice(trade.stop)}</dd></div>
+      <div><dt>Opened</dt><dd>{new Date(trade.openedAt).toISOString()}</dd></div>
+    </dl>
+  );
+}
+
+function CloseTradeForm({
+  exitFill,
+  onExitFillChange,
+  onClose,
+  error,
+  closing,
+}: {
+  exitFill: string;
+  onExitFillChange: (value: string) => void;
+  onClose: () => void;
+  error: string | null;
+  closing: boolean;
+}) {
+  return (
+    <div className="close-trade">
+      <h4>Close trade</h4>
+      <p className="field-help">Enter the paper exit fill price. The server computes the outcome, R multiple, and refreshed memory.</p>
+      <label className="field" htmlFor="exitFill">Exit fill</label>
+      <input
+        id="exitFill"
+        name="exitFill"
+        type="number"
+        inputMode="decimal"
+        min="0"
+        step="any"
+        value={exitFill}
+        onChange={(event) => onExitFillChange(event.target.value)}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "exit-error" : undefined}
+      />
+      {error ? <p className="field-error" id="exit-error" role="alert">{error}</p> : null}
+      <button className="secondary-button" type="button" onClick={onClose} disabled={closing}>
+        {closing ? "Closing…" : "Close paper trade"}
+      </button>
+    </div>
+  );
+}
+
+function TradeFlowSection({
+  result,
+  flow,
+  defied,
+  onToggleWarning,
+  onExecute,
+  onClose,
+  exitFill,
+  onExitFillChange,
+  closeError,
+}: {
+  result: Extract<IntentSubmissionState, { kind: "result" }>["result"];
+  flow: TradeFlowState;
+  defied: readonly WarningCode[];
+  onToggleWarning: (code: WarningCode) => void;
+  onExecute: () => void;
+  onClose: () => void;
+  exitFill: string;
+  onExitFillChange: (value: string) => void;
+  closeError: string | null;
+}) {
+  if (result.decision === "BLOCK") return null;
+
+  const shown = warningsShownFromResult(result);
+
+  return (
+    <section className="trade-flow" aria-labelledby="trade-flow-title">
+      <div className="section-heading">
+        <div>
+          <p className="section-kicker">Paper trade lifecycle</p>
+          <h3 id="trade-flow-title">Execute, monitor, and close</h3>
+        </div>
+        <span className="source-label">SERVER OUTPUT</span>
+      </div>
+
+      {flow.kind === "idle" || flow.kind === "executing" ? (
+        <div role="status">
+          <p className="field-help">
+            {result.decision === "PASS"
+              ? "This intent passed the tenant rules and is allowed for paper execution."
+              : "This intent has advisory warnings. Execution is allowed but records which shown warnings you defy."}
+          </p>
+          {result.decision === "WARN" && shown.length > 0 ? (
+            <WarningChecklist shown={shown} defied={defied} onToggle={onToggleWarning} />
+          ) : null}
+          {flow.kind === "executing" ? (
+            <p className="field-help" aria-live="polite">Executing paper trade…</p>
+          ) : (
+            <button className="primary-button" type="button" onClick={onExecute}>
+              Execute paper trade
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {flow.kind === "blocked" || flow.kind === "validation_error" || flow.kind === "unavailable" ? (
+        <div className="unavailable-state" role="alert">
+          <p>{flow.message}</p>
+          <p className="field-help">
+            {flow.kind === "blocked"
+              ? "Blocked intents cannot execute. No paper trade was opened."
+              : flow.kind === "validation_error"
+                ? "The trade request was rejected before execution."
+                : "No paper trade was opened."}
+          </p>
+        </div>
+      ) : null}
+
+      {flow.kind === "open" || flow.kind === "closing" || flow.kind === "close_error" ? (
+        <div>
+          <OpenTradeView trade={flow.execution.trade} />
+          {flow.kind === "closing" ? (
+            <p className="field-help" aria-live="polite">Closing paper trade…</p>
+          ) : (
+            <>
+              {flow.kind === "close_error" ? (
+                <p className="field-error" role="alert">{flow.message}</p>
+              ) : null}
+              <CloseTradeForm
+                exitFill={exitFill}
+                onExitFillChange={onExitFillChange}
+                onClose={onClose}
+                error={closeError}
+                closing={false}
+              />
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {flow.kind === "closed" ? (
+        <ClosedOutcomeView closed={flow.closed} />
+      ) : null}
+    </section>
+  );
+}
+
+function ClosedOutcomeView({ closed }: { closed: CloseTradeApiSuccess }) {
+  const { outcome, memory } = closed;
+  return (
+    <div className="closed-trade">
+      <div className="result-heading">
+        <strong className={`outcome-${getOutcomeTone(String(outcome.rMultiple))}`}>
+          {outcome.win ? "WIN" : "LOSS"}
+        </strong>
+        <span className="source-label">SERVER OUTCOME</span>
+      </div>
+      <h4>Trade outcome</h4>
+      <dl className="evidence-grid">
+        <div><dt>P&L</dt><dd>{formatPrice(outcome.pnl)}</dd></div>
+        <div><dt>R multiple</dt><dd>{outcome.rMultiple.toFixed(2)}R</dd></div>
+        <div><dt>Exit fill</dt><dd>{formatPrice(outcome.exitFill)}</dd></div>
+        <div><dt>Exit reason</dt><dd>{outcome.exitReason}</dd></div>
+        <div><dt>Held</dt><dd>{formatDuration(outcome.durationS)}</dd></div>
+        <div><dt>Trade</dt><dd>{outcome.tradeId}</dd></div>
+      </dl>
+      <div className="section-heading">
+        <div>
+          <p className="section-kicker">Refreshed memory evidence</p>
+          <h4>{memory.evidence.tier}, n={memory.evidence.n}, avg {memory.evidence.averageR === null ? "—" : `${memory.evidence.averageR.toFixed(2)}R`}</h4>
+        </div>
+        <span className="source-label">TENANT MEMORY</span>
+      </div>
+      <p className="field-help">Lineage intent {memory.lineage}</p>
+    </div>
+  );
+}
+
 function EmptyWorkspace() {
   const view = getWorkspaceView("empty");
   return (
@@ -410,6 +647,10 @@ export default function Home() {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [errors, setErrors] = useState<IntentErrors>({});
   const [submission, setSubmission] = useState<IntentSubmissionState>({ kind: "empty" });
+  const [tradeFlow, setTradeFlow] = useState<TradeFlowState>({ kind: "idle" });
+  const [defiedWarnings, setDefiedWarnings] = useState<WarningCode[]>([]);
+  const [exitFill, setExitFill] = useState("");
+  const [closeError, setCloseError] = useState<string | null>(null);
 
   function update<K extends keyof IntentDraft>(field: K, value: IntentDraft[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -441,6 +682,70 @@ export default function Home() {
         kind: "unavailable",
         message: "The decision service could not be reached.",
       });
+    }
+  }
+
+  function toggleWarning(code: WarningCode) {
+    setDefiedWarnings((current) =>
+      current.includes(code) ? current.filter((item) => item !== code) : [...current, code],
+    );
+  }
+
+  async function executeTrade() {
+    if (submission.kind !== "result") return;
+    const shown = warningsShownFromResult(submission.result);
+    setCloseError(null);
+    setTradeFlow({ kind: "executing" });
+    try {
+      const response = await fetch("/api/trades", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildExecutePayload(toTradeIntentInput(draft), shown, defiedWarnings)),
+      });
+      const body: unknown = await response.json();
+      const outcome = interpretTradeApiResponse(response.status, body);
+      if (outcome.kind === "executed") {
+        setDefiedWarnings([]);
+        setTradeFlow({ kind: "open", execution: outcome.executed });
+      } else if (outcome.kind === "blocked") {
+        setTradeFlow({ kind: "blocked", message: outcome.message });
+      } else if (outcome.kind === "validation_error") {
+        setTradeFlow({ kind: "validation_error", message: outcome.message });
+      } else {
+        setTradeFlow({ kind: "unavailable", message: outcome.message });
+      }
+    } catch {
+      setTradeFlow({ kind: "unavailable", message: "The paper trade service could not be reached." });
+    }
+  }
+
+  async function submitClose() {
+    if (tradeFlow.kind !== "open" && tradeFlow.kind !== "close_error") return;
+    const execution = tradeFlow.execution;
+    let payload: { tradeId: string; exitFill: number };
+    try {
+      payload = buildClosePayload(execution.trade.id, exitFill);
+    } catch (error) {
+      setCloseError(error instanceof Error ? error.message : "Enter a valid exit fill.");
+      return;
+    }
+    setCloseError(null);
+    setTradeFlow({ kind: "closing", execution });
+    try {
+      const response = await fetch("/api/trades/close", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body: unknown = await response.json();
+      const outcome = interpretCloseApiResponse(response.status, body);
+      if (outcome.kind === "closed") {
+        setTradeFlow({ kind: "closed", closed: outcome.closed });
+      } else {
+        setTradeFlow({ kind: "close_error", execution, message: outcome.message });
+      }
+    } catch {
+      setTradeFlow({ kind: "close_error", execution, message: "The close service could not be reached." });
     }
   }
 
@@ -527,7 +832,22 @@ export default function Home() {
           <div className="result-panel-body">
             {submission.kind === "empty" ? <EmptyWorkspace /> : null}
             {submission.kind === "loading" ? <LoadingWorkspace /> : null}
-            {submission.kind === "result" ? <LiveWorkspace result={submission.result} /> : null}
+            {submission.kind === "result" ? (
+              <>
+                <LiveWorkspace result={submission.result} />
+                <TradeFlowSection
+                  result={submission.result}
+                  flow={tradeFlow}
+                  defied={defiedWarnings}
+                  onToggleWarning={toggleWarning}
+                  onExecute={executeTrade}
+                  onClose={submitClose}
+                  exitFill={exitFill}
+                  onExitFillChange={setExitFill}
+                  closeError={closeError}
+                />
+              </>
+            ) : null}
             {submission.kind === "validation_error" ? <ValidationWorkspace message={submission.message} /> : null}
             {submission.kind === "unavailable" ? (
               <UnavailableWorkspace

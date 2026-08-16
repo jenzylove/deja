@@ -1,4 +1,6 @@
 import type { IntentApiSuccess } from "./intent-route";
+import type { WarningCode } from "./paper-trade";
+export type { WarningCode };
 
 export const FIELD_OPTIONS = {
   direction: ["long", "short"],
@@ -201,6 +203,201 @@ export function interpretIntentApiResponse(status: number, body: unknown): Inten
     return { kind: "unavailable", message: body.message };
   }
   return { kind: "unavailable", message: "The decision response was invalid." };
+}
+
+/**
+ * Deterministic mapping from failed-warn rule field to the closed warning
+ * taxonomy. Mirrors the server's shared FIELD_TO_WARNING so the WARN defiance
+ * checklist offers exactly the advisory warnings the server would show.
+ */
+export const FIELD_TO_WARNING_CODE: Record<string, WarningCode> = {
+  risk_pct: "OVERSIZED_RISK",
+  minutes_since_last_loss: "POST_LOSS_REENTRY",
+  trades_today: "DAILY_CAP_EXCEEDED",
+  has_stop_loss: "NO_STOP_LOSS",
+  size_increase_after_loss: "SIZE_ESCALATION",
+};
+
+/** Warning codes whose advisory rule actually failed in the returned decision. */
+export function warningsShownFromResult(result: IntentApiSuccess): WarningCode[] {
+  const codes = result.rules.evidence
+    .filter((rule) => !rule.passed && rule.enforcement === "warn")
+    .map((rule) => FIELD_TO_WARNING_CODE[rule.field])
+    .filter((code): code is WarningCode => Boolean(code));
+  return [...new Set(codes)];
+}
+
+export interface OpenTradeState {
+  id: string;
+  asset: string;
+  direction: string;
+  size: number;
+  entry: number;
+  stop: number | null;
+  openedAt: string;
+}
+
+export interface ExecuteTradeApiSuccess {
+  state: "executed";
+  decision: "BLOCK" | "WARN" | "PASS";
+  decisionId: string;
+  tradeId: string;
+  replayed: boolean;
+  warningsShown: WarningCode[];
+  warningsDefied: WarningCode[];
+  trade: OpenTradeState;
+}
+
+export type TradeExecutionResult =
+  | { kind: "executed"; executed: ExecuteTradeApiSuccess }
+  | { kind: "blocked"; message: string }
+  | { kind: "validation_error"; message: string }
+  | { kind: "unavailable"; message: string };
+
+export interface ExecuteTradeApiRequest {
+  intent: TradeIntentPayload;
+  action: "executed" | "modified_then_executed";
+  warningsDefied: WarningCode[];
+}
+
+/**
+ * Build the POST /api/trades body from the canonical intent. The client never
+ * supplies the user_id or the decision; both come from the trusted server.
+ * Defying every shown warning (or having none shown) is an unmodified
+ * 'executed' action; defying only a proper subset records
+ * 'modified_then_executed', which is the only request form the route accepts
+ * for partial WARN defiance.
+ */
+export function buildExecutePayload(
+  intent: TradeIntentPayload,
+  warningsShown: WarningCode[],
+  warningsDefied: WarningCode[],
+): ExecuteTradeApiRequest {
+  const defiedEverything = warningsShown.length === warningsDefied.length;
+  return {
+    intent,
+    action: defiedEverything ? "executed" : "modified_then_executed",
+    warningsDefied,
+  };
+}
+
+function isExecuteTradeSuccess(value: unknown): value is ExecuteTradeApiSuccess {
+  if (!isRecord(value) || value.state !== "executed") return false;
+  if (!["BLOCK", "WARN", "PASS"].includes(String(value.decision))) return false;
+  if (typeof value.decisionId !== "string" || typeof value.tradeId !== "string") return false;
+  if (typeof value.replayed !== "boolean") return false;
+  if (!Array.isArray(value.warningsShown) || !Array.isArray(value.warningsDefied)) return false;
+  if (!isRecord(value.trade)) return false;
+  const trade = value.trade;
+  return (
+    typeof trade.id === "string" &&
+    typeof trade.asset === "string" &&
+    typeof trade.direction === "string" &&
+    typeof trade.size === "number" &&
+    typeof trade.entry === "number" &&
+    (trade.stop === null || typeof trade.stop === "number") &&
+    typeof trade.openedAt === "string"
+  );
+}
+
+function tradeMessage(body: unknown): string {
+  return isRecord(body) && typeof body.message === "string"
+    ? body.message
+    : "The paper trade service could not complete the request.";
+}
+
+export function interpretTradeApiResponse(status: number, body: unknown): TradeExecutionResult {
+  if (status >= 200 && status < 300 && isExecuteTradeSuccess(body)) {
+    return { kind: "executed", executed: body };
+  }
+  if (status === 409 && isRecord(body) && body.state === "blocked") {
+    return { kind: "blocked", message: tradeMessage(body) };
+  }
+  if ((status === 400 || status === 413) && isRecord(body) && body.state === "validation_error") {
+    return { kind: "validation_error", message: tradeMessage(body) };
+  }
+  if (status === 503 && isRecord(body) && body.state === "unavailable") {
+    return { kind: "unavailable", message: tradeMessage(body) };
+  }
+  return { kind: "unavailable", message: "The paper trade response was invalid." };
+}
+
+export function buildClosePayload(tradeId: string, exitFill: string): {
+  tradeId: string;
+  exitFill: number;
+} {
+  const parsed = Number(exitFill);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("Exit fill must be a finite positive number.");
+  }
+  return { tradeId, exitFill: parsed };
+}
+
+export interface CloseTradeApiSuccess {
+  state: "closed";
+  outcome: {
+    tradeId: string;
+    intentId: string;
+    pnl: number;
+    rMultiple: number;
+    durationS: number;
+    exitFill: number;
+    exitReason: string;
+    win: boolean;
+  };
+  memory: {
+    evidence: { tier: string; n: number; averageR: number | null };
+    lineage: string;
+  };
+}
+
+export type TradeClosureResult =
+  | { kind: "closed"; closed: CloseTradeApiSuccess }
+  | { kind: "validation_error"; message: string }
+  | { kind: "not_found"; message: string }
+  | { kind: "already_closed"; message: string }
+  | { kind: "unavailable"; message: string };
+
+function isCloseTradeSuccess(value: unknown): value is CloseTradeApiSuccess {
+  if (!isRecord(value) || value.state !== "closed") return false;
+  if (!isRecord(value.outcome) || !isRecord(value.memory)) return false;
+  const outcome = value.outcome;
+  const memory = value.memory;
+  if (
+    typeof outcome.tradeId !== "string" ||
+    typeof outcome.intentId !== "string" ||
+    typeof outcome.pnl !== "number" ||
+    typeof outcome.rMultiple !== "number" ||
+    typeof outcome.durationS !== "number" ||
+    typeof outcome.exitFill !== "number" ||
+    typeof outcome.exitReason !== "string" ||
+    typeof outcome.win !== "boolean"
+  ) {
+    return false;
+  }
+  if (!isRecord(memory.evidence) || typeof memory.evidence.tier !== "string") return false;
+  if (typeof memory.evidence.n !== "number") return false;
+  if (memory.evidence.averageR !== null && typeof memory.evidence.averageR !== "number") return false;
+  return typeof memory.lineage === "string";
+}
+
+export function interpretCloseApiResponse(status: number, body: unknown): TradeClosureResult {
+  if (status >= 200 && status < 300 && isCloseTradeSuccess(body)) {
+    return { kind: "closed", closed: body };
+  }
+  if (status === 404 && isRecord(body) && body.state === "not_found") {
+    return { kind: "not_found", message: tradeMessage(body) };
+  }
+  if (status === 409 && isRecord(body) && body.state === "already_closed") {
+    return { kind: "already_closed", message: tradeMessage(body) };
+  }
+  if ((status === 400 || status === 413) && isRecord(body) && body.state === "validation_error") {
+    return { kind: "validation_error", message: tradeMessage(body) };
+  }
+  if (status === 503 && isRecord(body) && body.state === "unavailable") {
+    return { kind: "unavailable", message: tradeMessage(body) };
+  }
+  return { kind: "unavailable", message: "The close response was invalid." };
 }
 
 interface ExampleRule {

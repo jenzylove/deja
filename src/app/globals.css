@@ -824,3 +824,103 @@ fieldset:disabled {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Paper trade lifecycle (execute, monitor, close) */
+.trade-flow {
+  padding: 30px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.trade-flow .section-heading {
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.trade-flow .section-heading h3 {
+  margin: 0;
+  font-size: 1.18rem;
+  font-weight: 620;
+  letter-spacing: -0.025em;
+}
+
+.trade-flow > div > .primary-button,
+.trade-flow button.primary-button {
+  margin-top: 16px;
+}
+
+.warning-checklist {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.warning-checklist legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.warning-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.78rem;
+}
+
+.warning-option input {
+  accent-color: var(--warn);
+}
+
+.close-trade,
+.closed-trade {
+  margin-top: 22px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.close-trade h4,
+.closed-trade h4 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.close-trade .field input {
+  margin-top: 6px;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 18px;
+  margin: 14px 0 0;
+}
+
+.evidence-grid div {
+  display: grid;
+  gap: 2px;
+}
+
+.evidence-grid dt {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.evidence-grid dd {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.closed-trade .section-heading {
+  margin-top: 22px;
+}

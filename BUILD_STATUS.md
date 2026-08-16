@@ -1093,3 +1093,36 @@ git diff --check                              passed
 - No UI wiring for execute/close/open-trade/refreshed-memory yet (next sub-slice).
 - No real authentication; no live CockroachDB/Bedrock; in-memory/local persistence only.
 - No browser dogfood, deployment, migration, credential access, or cloud provisioning performed.
+
+## Slice 2b: UI wiring for paper execution, open-trade state, closure, and refreshed memory
+
+Branch: `feat/end-to-end-app`.
+
+### RED
+Command: `npm run test:ui` (before execute/close helpers existed)
+Failed as expected on the new `buildExecutePayload` / `interpretTradeApiResponse` / `interpretCloseApiResponse` imports.
+
+### GREEN and verification
+```text
+npm run test:ui                                  9 new subtests pass (execute/close/interpret helpers, WARN defiance checklist map)
+npm run test:paper                               56 passed, 0 failed
+npm test                                         126 passed, 0 failed
+npx tsc --noEmit --incremental false             passed
+npm run lint                                     0 errors, 1 pre-existing warning in scripts/check-memory.ts
+npm run build                                    passed; routes: ○ / , ○ /_not-found , ƒ /api/intents , ƒ /api/trades , ƒ /api/trades/close
+npm audit --omit=dev                             found 0 vulnerabilities
+git diff --check                                 passed
+```
+
+### What changed
+- `src/lib/intent-ui.ts`: exported, unit-tested pure helpers `buildExecutePayload` (action 'executed' only when all shown warnings are defied or none shown, else 'modified_then_executed'; never attaches user_id/decision), `buildClosePayload` (validates positive finite fill), `interpretTradeApiResponse`, `interpretCloseApiResponse` (fail closed to unavailable on malformed), `warningsShownFromResult` + `FIELD_TO_WARNING_CODE`, and trade execution/closure state + response types. Re-exported `WarningCode`.
+- `src/app/page.tsx`: after a real PASS/WARN result, an "Execute paper trade" action posts the canonical intent to /api/trades; WARN shows a defiance checklist; open-trade state is rendered; a "Close trade" form posts the fill to /api/trades/close and renders closed outcome (pnl, R, win/loss, exit reason) plus refreshed memory evidence (tier, n, averageR). BLOCK returns null (not executable); blocked/validation/unavailable states render from real responses. Real /api/intents submit path untouched. Example/degraded fixtures remain clearly labeled and outside the success path.
+- `src/app/globals.css`: styles for the new execute/close/defiance UI.
+- `test/intent-ui.test.ts`: 9 new tests covering payload building (including partial WARN defiance timing), close payload validation, and response interpretation across executed/blocked/validation/unavailable/not_found/already_closed/malformed.
+
+### Honest limitations
+- Real authentication, live CockroachDB/Bedrock, monitoring/settlement, Trading DNA view, warning-compliance ledger view, migration, deployment, and browser dogfood remain open (later slices).
+- No deployment, credential access, dependency change, or cloud provisioning performed.
+
+### Next slice
+Monitoring/settlement and automatic behavioral event capture for the browser journey.

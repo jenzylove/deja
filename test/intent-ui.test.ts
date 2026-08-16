@@ -4,12 +4,18 @@ import test from "node:test";
 import {
   EXAMPLE_RESULT,
   FIELD_OPTIONS,
+  buildClosePayload,
+  buildExecutePayload,
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
+  interpretCloseApiResponse,
   interpretIntentApiResponse,
+  interpretTradeApiResponse,
   toTradeIntentInput,
+  warningsShownFromResult,
   type IntentDraft,
+  type WarningCode,
 } from "../src/lib/intent-ui";
 import { validateTradeIntent } from "../src/lib/intent-service";
 
@@ -175,4 +181,139 @@ test("malformed API success output fails closed in the UI contract", () => {
     { kind: "unavailable", message: "The decision response was invalid." },
   );
   assert.match(getWorkspaceView("loading").detail, /server decision service/i);
+});
+
+const canonicalIntent = toTradeIntentInput({ ...validDraft, thesisRaw: "range high reclaim with volume" });
+
+test("execute payload for PASS records an unmodified executed action with no defiance", () => {
+  const payload = buildExecutePayload(canonicalIntent, [], []);
+  assert.equal(payload.action, "executed");
+  assert.deepEqual(payload.warningsDefied, []);
+  assert.equal(payload.intent.thesisRaw, "range high reclaim with volume");
+});
+
+test("execute payload for WARN with full defiance uses executed; partial defiance is modified_then_executed", () => {
+  const shown: WarningCode[] = ["NO_STOP_LOSS", "OVERSIZED_RISK"];
+  const full = buildExecutePayload(canonicalIntent, shown, ["NO_STOP_LOSS", "OVERSIZED_RISK"]);
+  assert.equal(full.action, "executed");
+  assert.deepEqual(full.warningsDefied, shown);
+
+  const partial = buildExecutePayload(canonicalIntent, shown, ["NO_STOP_LOSS"]);
+  assert.equal(partial.action, "modified_then_executed");
+  assert.deepEqual(partial.warningsDefied, ["NO_STOP_LOSS"]);
+
+  const none = buildExecutePayload(canonicalIntent, shown, []);
+  assert.equal(none.action, "modified_then_executed");
+  assert.deepEqual(none.warningsDefied, []);
+});
+
+test("execute payload never lets the browser attach the user_id or the decision", () => {
+  const payload = buildExecutePayload(canonicalIntent, [], []);
+  assert.ok(!("userId" in payload));
+  assert.ok(!("user_id" in payload));
+  assert.ok(!("decision" in payload));
+});
+
+test("warnings shown are derived only from failed warn rules", () => {
+  const result = {
+    state: "complete",
+    decision: "WARN",
+    errors: [],
+    canonicalThesis: null,
+    retrieval: null,
+    behaviour: null,
+    rules: {
+      evidence: [
+        { ruleId: "a", field: "has_stop_loss", enforcement: "warn", passed: false },
+        { ruleId: "b", field: "risk_pct", enforcement: "warn", passed: false },
+        { ruleId: "c", field: "risk_pct", enforcement: "warn", passed: false },
+        { ruleId: "d", field: "risk_pct", enforcement: "block", passed: false },
+        { ruleId: "e", field: "has_stop_loss", enforcement: "warn", passed: true },
+      ],
+    },
+  } as unknown as Parameters<typeof warningsShownFromResult>[0];
+  assert.deepEqual(warningsShownFromResult(result), ["NO_STOP_LOSS", "OVERSIZED_RISK"]);
+});
+
+test("execute API responses map to executed, blocked, validation, and unavailable states", () => {
+  const executed = interpretTradeApiResponse(200, {
+    state: "executed",
+    decision: "PASS",
+    decisionId: "11111111-1111-4111-8111-111111111111",
+    tradeId: "22222222-2222-4222-8222-222222222222",
+    replayed: false,
+    warningsShown: [],
+    warningsDefied: [],
+    trade: {
+      id: "22222222-2222-4222-8222-222222222222",
+      asset: "BTC",
+      direction: "long",
+      size: 0.05,
+      entry: 64000,
+      stop: 62800,
+      openedAt: "2026-08-16T12:00:00.000Z",
+    },
+  });
+  assert.equal(executed.kind, "executed");
+  assert.equal(executed.kind === "executed" ? executed.executed.decision : null, "PASS");
+  assert.equal(executed.kind === "executed" ? executed.executed.trade.asset : null, "BTC");
+
+  const blocked = interpretTradeApiResponse(409, { state: "blocked", decision: "BLOCK", message: "Blocked intents cannot execute." });
+  assert.deepEqual(blocked, { kind: "blocked", message: "Blocked intents cannot execute." });
+
+  const validation = interpretTradeApiResponse(400, { state: "validation_error", message: "Invalid execute request." });
+  assert.deepEqual(validation, { kind: "validation_error", message: "Invalid execute request." });
+
+  const unavailable = interpretTradeApiResponse(503, { state: "unavailable", message: "Paper trade service unavailable." });
+  assert.deepEqual(unavailable, { kind: "unavailable", message: "Paper trade service unavailable." });
+});
+
+test("malformed execute success output fails closed as unavailable", () => {
+  const invalid = interpretTradeApiResponse(200, { state: "blocked", message: "not a success" });
+  assert.deepEqual(invalid, { kind: "unavailable", message: "The paper trade response was invalid." });
+});
+
+test("close payload validates a positive finite exit fill", () => {
+  assert.deepEqual(
+    buildClosePayload("22222222-2222-4222-8222-222222222222", "64800"),
+    { tradeId: "22222222-2222-4222-8222-222222222222", exitFill: 64800 },
+  );
+  assert.throws(() => buildClosePayload("trade-1", "0"), /positive number/);
+  assert.throws(() => buildClosePayload("trade-1", "NaN"), /positive number/);
+});
+
+test("close API responses map to closed, not-found, already-closed, validation, and unavailable", () => {
+  const closedBody = {
+    state: "closed",
+    outcome: {
+      tradeId: "22222222-2222-4222-8222-222222222222",
+      intentId: "11111111-1111-4111-8111-111111111111",
+      pnl: 20,
+      rMultiple: 1.2,
+      durationS: 3600,
+      exitFill: 64800,
+      exitReason: "manual",
+      win: true,
+    },
+    memory: {
+      evidence: { tier: "anecdote", n: 1, averageR: 1.2 },
+      lineage: "11111111-1111-4111-8111-111111111111",
+    },
+  };
+  const closed = interpretCloseApiResponse(200, closedBody);
+  assert.equal(closed.kind, "closed");
+  assert.equal(closed.kind === "closed" ? closed.closed.outcome.rMultiple : null, 1.2);
+  assert.equal(closed.kind === "closed" ? closed.closed.memory.evidence.tier : null, "anecdote");
+
+  assert.deepEqual(interpretCloseApiResponse(404, { state: "not_found", message: "no trade" }), { kind: "not_found", message: "no trade" });
+  assert.deepEqual(interpretCloseApiResponse(409, { state: "already_closed", message: "closed." }), { kind: "already_closed", message: "closed." });
+  assert.deepEqual(interpretCloseApiResponse(400, { state: "validation_error", message: "bad." }), { kind: "validation_error", message: "bad." });
+  assert.deepEqual(interpretCloseApiResponse(503, { state: "unavailable", message: "gone." }), { kind: "unavailable", message: "gone." });
+});
+
+test("malformed close success output fails closed as unavailable", () => {
+  assert.deepEqual(interpretCloseApiResponse(200, { state: "bogus" }), {
+    kind: "unavailable",
+    message: "The close response was invalid.",
+  });
 });
