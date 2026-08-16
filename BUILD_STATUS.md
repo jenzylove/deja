@@ -748,3 +748,273 @@ git diff --check      passed
 Production-browser verification at `127.0.0.1:3000` confirmed the contract-complete form renders without clipping or horizontal overflow. The service-valid thesis `brief` transitioned directly to unavailable with no loading copy, no field errors, and zero `/api/` resources.
 
 No API route, tenant input, live provider request, credential access, paper execution, deployment, commit, or push was added or performed.
+
+## Phase 6 gate - paper execution and closure-to-memory
+
+Baseline: `2089fb5`
+
+Scope is limited to a trusted-server domain and persistence seam for paper execution, deterministic closure, outcome memory, evidence-tier recomputation, statistically gated pattern candidates, and warning compliance self-audit. Every query and mutation must be tenant-scoped. BLOCK must perform no persistence. WARN execution must record shown versus explicitly defied warnings. Statistics are recomputed from validated stored outcomes and anecdote cohorts cannot expose percentages. No API route, browser integration, fake price feed, timer, provider call, live database access, credential use, scheduled job, deployment, or cloud change is authorized.
+
+### Phase 6 RED evidence
+
+Each vertical behavior was exercised before its production implementation:
+
+```text
+npx tsx --test test/paper-trade.test.ts
+Error: Cannot find module '../src/lib/paper-trade'
+# tests 1, pass 0, fail 1
+
+npx tsx --test --test-name-pattern="closure|close replay" test/paper-trade.test.ts
+TypeError: closePaperTrade is not a function
+# tests 6, pass 0, fail 6
+
+npx tsx --test --test-name-pattern="evidence|boundaries|outcomes|pattern candidate|self-audit" test/paper-trade.test.ts
+TypeError: recomputeCohortEvidence/createPatternCandidate/recomputeWarningAudit is not a function
+# tests 6, pass 0, fail 6
+
+npx tsx --test --test-name-pattern="Cockroach|production cohort" test/paper-trade.test.ts
+Error: Cannot find module '../src/lib/paper-store'
+# tests 1, pass 0, fail 1
+
+npx tsx --test --test-name-pattern="schema enforces|pattern append" test/paper-trade.test.ts
+missing UNIQUE (user_id, intent_id); store.appendPattern is not a function
+# tests 2, pass 0, fail 2
+```
+
+These were expected feature-absence failures, not live provider or database results.
+
+### Phase 6 GREEN evidence
+
+```text
+npm run test:paper   23 passed, 0 failed
+npm test             62 passed, 0 failed
+npx tsc --noEmit     passed
+npm run lint         0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build        passed; static / and /_not-found routes generated
+npm audit --omit=dev found 0 vulnerabilities
+git diff --check     passed
+secret-pattern scan  0 matches in Phase 6/status/schema/package files
+```
+
+The deterministic fixture suite covers tenant injection and unknown fields before persistence, BLOCK zero calls, warning subset/enum checks, atomic duplicate open, missing/cross-tenant/replayed closure, long/short PnL and R, zero risk, low-n suppression and three raw episodes, signal/established boundaries, Wilson significance gating, malformed outcomes/statistics, self-audit branch averages/nulls, append-only pattern writes, sanitized persistence errors, schema replay protection, and tenant scope on every participating join/write/upsert.
+
+No live CockroachDB/provider verification was attempted or claimed. The CockroachDB adapter was exercised only through injected deterministic SQL clients; applying and validating the changed schema against a real cluster remains a later authorized integration step.
+
+### Phase 6 adversarial security repair
+
+Parent review found that the first implementation accepted the decision and size from the execution command, sourced self-audit rows from the warning table rather than the recorded decision, silently accepted missing pattern lineage, and could overflow derived averages. Focused RED tests reproduced each issue before repair. The boundary now receives decision authorization separately from the closed untrusted command, rejects authorization and size injection, and takes size only from the tenant-scoped claimed intent. Adapter result IDs are runtime-validated. Self-audit unnests `decisions.warnings_shown`. Missing tenant lineage rolls back the pattern transaction. Derived statistics reject non-finite results.
+
+The final focused RED required one warning observation per trade and code:
+
+```text
+npm run test:paper
+# tests 29
+# pass 28
+# fail 1
+production cohort and warning joins scope every participating table by user_id
+Expected warning-audit SQL to match SELECT DISTINCT
+```
+
+After adding SQL-boundary deduplication, the complete repaired gate passed:
+
+```text
+npm run test:paper             29 passed, 0 failed
+npm test                       68 passed, 0 failed
+npx tsc --noEmit --incremental false  passed
+npm run lint                   0 errors, 1 unchanged warning
+npm run build                  passed; static routes generated
+npm audit --omit=dev           0 vulnerabilities
+git diff --check               passed
+```
+
+No API route, UI integration, live database/provider call, credential access, scheduled job, deployment, commit, or push was performed in this gate.
+
+### Independent Phase 6 review and second repair
+
+Independent read-only review `deleg_da53217a` returned **FAIL** on the frozen 29-test candidate. It reproduced three release blockers: unchanged WARN execution could be counted as heeded, direct pattern persistence accepted empty or incomplete lineage, and lossy/unbound filters allowed derived memory that could not be reproduced from its stored predicate.
+
+Focused RED tests were added before each repair. They now enforce complete explicit defiance for unchanged WARN execution, allow mixed disposition only for `modified_then_executed`, reject duplicate intent outcomes, apply a closed canonical filter before deriving statistics and lineage, validate direct persistence inputs before connecting, and route tenant-stored outcomes plus warning observations through one atomic memory-refresh seam with retry identity.
+
+A final compile RED caught a duplicate test fixture declaration:
+
+```text
+npm run test:paper
+Transform failed: test/paper-trade.test.ts:565:8
+The symbol "candidate" has already been declared
+# tests 1, pass 0, fail 1
+```
+
+After that repair, parent review added two more trust-boundary RED assertions. The untrusted execution command still controlled `entryFill`, allowing evaluated risk to drift, and refresh evidence described all outcomes rather than the requested filtered cohort. The RED run produced 29 passes and 9 failures, including missing rejection of `entryFill`, valid command shape failures, filtered evidence `10 !== 8`, and absent canonical entry in the trade insert.
+
+The final implementation removes fill from the untrusted command, takes both size and paper entry from the tenant-scoped claimed intent, and returns evidence derived from the same validated filter used for the pattern candidate.
+
+```text
+npm run test:paper                    38 passed, 0 failed
+npm test                              77 passed, 0 failed
+npx tsc --noEmit --incremental false passed
+npm run lint                          0 errors, 1 unchanged warning
+npm run build                         passed; static routes generated
+npm audit --omit=dev                  0 vulnerabilities
+git diff --check                      passed
+```
+
+No live CockroachDB, provider, API, UI paper execution, credential, timer, random feed, deployment, commit, or push was used or performed. Existing databases would require an authorized migration because fresh-schema edits do not alter an already provisioned cluster.
+
+### Second Phase 6 FAIL review and third repair
+
+The second independent FAIL report reproduced three remaining blockers: mathematically valid pattern claims could commit against authoritative rows with different outcomes/filter fields, symbol-keyed and custom-prototype values bypassed exact object boundaries, and full warning-audit refreshes left obsolete materialized codes in place.
+
+Strict vertical RED runs reproduced each blocker before production changes:
+
+```text
+pattern source-coherence RED: INSERT INTO patterns was reached (true !== false)
+exact-boundary RED: symbol-keyed execution command reached the store (missing expected rejection)
+stale-audit RED: no DELETE FROM warning_outcomes was issued (-1)
+```
+
+The repair now reloads every source trade's authoritative outcome and cohort fields inside the pattern transaction and independently reproduces the candidate before insertion. Exact object boundaries reject symbol keys and non-plain prototypes. Full warning-audit persistence tenant-scopes a stale-code cleanup before upserting the recomputed rows in the same transaction.
+
+```text
+npm run test:paper                    41 passed, 0 failed
+npm test                              80 passed, 0 failed
+npx tsc --noEmit --incremental false passed
+npm run lint                          0 errors, 1 unchanged warning
+npm run build                         passed; static routes generated
+npm audit --omit=dev                  0 vulnerabilities
+git diff --check                      passed
+```
+
+No live database/provider call, API/UI addition, dependency change, credential access, deployment, commit, or push was performed.
+
+Parent adversarial review then identified a remaining subset attack: direct persistence could verify all caller-supplied source rows while ignoring additional tenant outcomes that matched the same filter. A RED fixture modeled eight selected wins plus eight omitted matching losses. The existing `ANY(source_ids)` query reached `INSERT INTO patterns`, failing the no-insert assertion.
+
+The transaction-time verifier now loads the full tenant-owned closed outcome set, applies the validated filter through the same domain derivation, and requires exact candidate statistics and exact source-set equality before any pattern insert.
+
+```text
+npm run test:paper                    42 passed, 0 failed
+npm test                              81 passed, 0 failed
+npx tsc --noEmit --incremental false passed
+npm run lint                          0 errors, 1 unchanged warning
+npm run build                         passed; static routes generated
+npm audit --omit=dev                  0 vulnerabilities
+git diff --check                      passed
+```
+
+No live database/provider call, API/UI change, credential access, deployment, commit, or push was performed.
+
+### Third independent Phase 6 FAIL and fourth security repair
+
+The third independent FAIL found that descriptor-unsafe validation could read a trusted authorization getter more than once, allowing a value that was BLOCK during validation to become PASS before persistence. It also found that non-enumerable properties were invisible to `Object.keys`, and that nested arrays and adapter outputs were not uniformly protected from sparse, accessor, symbol, extra-property, custom-prototype, or Proxy inputs.
+
+The focused RED run captured all four adversarial groups failing before production repair:
+
+```text
+npx tsx --test --test-name-pattern='stateful decision accessor|non-enumerable properties|recursive boundaries|Proxy get traps' test/paper-trade.test.ts
+# tests 4
+# pass 0
+# fail 4
+stateful decision accessor: getter invoked 3 times (3 !== 0)
+non-enumerable properties: missing expected rejection
+recursive boundaries: malformed array reached warning-defiance validation
+Proxy get trap: missing expected rejection
+```
+
+A second adapter-output RED proved that accessor output was initially surfaced as `INVALID_REQUEST` instead of a sanitized persistence failure:
+
+```text
+npx tsx --test --test-name-pattern='malformed execution adapter output' test/paper-trade.test.ts
+# tests 1
+# pass 0
+# fail 1
+caught PaperTradeError: Paper trade request is invalid
+```
+
+The repair introduces recursive immutable plain-data snapshots built only from own property descriptors. Records must use `Object.prototype` or a null prototype and contain only enumerable own string data properties. Arrays must be ordinary, dense, and contain exactly `length` plus canonical own enumerable data indices. Accessors, symbols, hidden properties, extra array keys, custom prototypes, Proxies, and cycles fail closed without invoking getters. Domain validation and every subsequent read operate on the detached snapshot. This is applied to tenant/auth/execution, close request and store row/outcome, evidence outcomes/filter/candidates, warning observations/audit rows, refresh requests and stored adapter outputs. Existing exact-key and finite-number checks remain in force; malformed public adapter results are sanitized as persistence failures.
+
+Final verification:
+
+```text
+npm run test:paper                         46 passed, 0 failed
+npm test                                   85 passed, 0 failed
+npx tsc --noEmit --incremental false       passed
+npm run lint                               0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build                              passed; static / and /_not-found routes generated
+npm audit --audit-level=high               exit 0; 4 moderate dev-tool vulnerabilities reported, high threshold clear
+npm audit --omit=dev                       found 0 vulnerabilities
+git diff --check                           passed
+```
+
+No live database/provider/API/UI call, credential access, dependency change, deployment, commit, or push was performed.
+
+### Fourth independent Phase 6 FAIL and fifth security repair
+
+The fourth independent frozen-diff review returned **FAIL** because Cockroach adapter results were still read through `result.rows`, row objects, and `rowCount` without a descriptor-safe capture. Accessor-backed or Proxy/exotic adapter values could therefore execute getters or influence derived inserts/updates before rollback. The review also found that `refreshPaperMemory` passed the same mutable candidate and warning-audit objects to persistence and then returned them, allowing a stateful store to rewrite returned evidence aliases (`rate = Infinity`, empty lineage, and `timesShown = 999`).
+
+The focused RED run reproduced the trust gaps before production repair:
+
+```text
+npx tsx --test --test-name-pattern='refresh persistence receives|Cockroach open rejects accessor|Cockroach open fails closed|Cockroach close rejects an accessor|pattern lineage rejects accessor' test/paper-trade.test.ts
+# tests 5
+# pass 0
+# fail 5
+refresh aliasing: Infinity !== 1
+open canonical row: accessor values were consumed and a derived insert path was reached
+open exotic rows: malformed adapter output surfaced after derived work
+close lock row: accessor values reached compute instead of failing closed
+pattern full cohort: 80 getter reads (80 !== 0)
+```
+
+The repair exports `captureDescriptorSafeSqlResult`, which snapshots each consumed SQL result once from own data-property descriptors, rejects accessor/Proxy/hidden/symbol/custom-prototype/sparse/extra containers, validates exact result and row shapes plus safe `rowCount`, and exposes only detached frozen rows. Every Cockroach result boundary used for a read or derived write now passes through that capture: intent claim/replay, decision and trade IDs, close lock/update, closed outcomes, warning observations, authoritative full-cohort rows, inserted pattern IDs, and persisted lineage. Boundary-specific primitive, UUID, decimal, date, row-count, tenant, and row-length checks run before derived writes. Malformed adapter output remains sanitized as `PERSISTENCE_UNAVAILABLE`; transactional paths roll back and do not commit.
+
+Refresh persistence now receives independently captured deep-frozen candidate and audit snapshots. The returned evidence/candidate/audit is a separate deep-frozen capture, so attempted persistence mutation cannot alter finite rates, lineage, counts, or returned aliases. Earlier accessor BLOCK, hidden-field, full-cohort cherry-pick, and stale-warning cleanup regressions remain covered.
+
+Final verification:
+
+```text
+npm run test:paper                         53 passed, 0 failed
+npm test                                   92 passed, 0 failed
+npx tsc --noEmit --incremental false       passed
+npm run lint                               0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build                              passed; static / and /_not-found routes generated
+npm audit --audit-level=high               exit 0; 4 moderate dev-tool vulnerabilities reported, high threshold clear
+npm audit --omit=dev                       found 0 vulnerabilities
+git diff --check                           passed
+```
+
+No live database/provider/API/UI call, credential access, dependency change, deployment, commit, or push was performed.
+
+Parent compatibility review then found that the initial descriptor-safe SQL wrapper expected a plain two-field object. The installed `pg` driver returns a custom `Result` instance with own metadata fields such as `command`, `oid`, `fields`, and parser state, so every real Cockroach result would have failed closed before row validation.
+
+A RED test using that installed node-postgres result shape failed with `INVALID_REQUEST`. The capture now recognizes only plain/null containers or a `Result` prototype, requires every own key to be an enumerable data descriptor from the closed node-postgres metadata set, and captures only own `rows` and `rowCount` descriptor values. Row arrays and row objects still pass through recursive descriptor-safe cloning, while unknown, hidden, symbolic, accessor, Proxy, sparse, and custom row inputs remain blocked.
+
+```text
+npm run test:paper                         54 passed, 0 failed
+npm test                                   93 passed, 0 failed
+npx tsc --noEmit --incremental false       passed
+npm run lint                               0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build                              passed; static / and /_not-found routes generated
+npm audit --audit-level=high               exit 0; 4 moderate dev-tool vulnerabilities reported, high threshold clear
+npm audit --omit=dev                       found 0 vulnerabilities
+git diff --check                           passed
+```
+
+No live CockroachDB query, provider/API/UI call, credential access, dependency change, deployment, commit, or push was performed.
+
+### Fifth independent Phase 6 FAIL and prototype-trap repair
+
+The fifth frozen-diff review returned **FAIL** because a normal SQL result object could inherit from a Proxy prototype. Inspecting that prototype's `constructor` descriptor invoked its trap before the result's own `rows` and `rowCount` were captured, allowing the trap to replace empty rows with forged data.
+
+The focused RED reproduced the issue: the Proxy prototype trap executed and surfaced its sentinel error instead of `INVALID_REQUEST`. Capture now rejects Proxy prototypes before any descriptor inspection. Parent review also closed the adjacent path where a prototype's own constructor value is itself a Proxy function, replacing direct `.name` access with Proxy rejection and an own data-descriptor read of the function name. Regression tests prove both trap counts stay zero and the original result rows remain unchanged.
+
+```text
+npm run test:paper                         56 passed, 0 failed
+npm test                                   95 passed, 0 failed
+npx tsc --noEmit --incremental false       passed
+npm run lint                               0 errors, 1 unchanged warning in scripts/check-memory.ts
+npm run build                              passed; static / and /_not-found routes generated
+npm audit --audit-level=high               exit 0; 4 moderate dev-tool vulnerabilities reported, high threshold clear
+npm audit --omit=dev                       found 0 vulnerabilities
+git diff --check                           passed
+```
+
+No live CockroachDB query, provider/API/UI call, credential access, dependency change, deployment, commit, or push was performed.
