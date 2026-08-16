@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   warnings_shown  warning_code[] NOT NULL DEFAULT ARRAY[]::warning_code[],
   warnings_defied warning_code[] NOT NULL DEFAULT ARRAY[]::warning_code[],
   rules_blocked   UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+  UNIQUE (user_id, intent_id),
   INDEX idx_decisions_user (user_id, at DESC),
   INDEX idx_decisions_intent (intent_id)
 );
@@ -254,6 +255,7 @@ CREATE TABLE IF NOT EXISTS trades (
   -- so rather than imply the trader wrote a rationale they never wrote.
   source         trade_source NOT NULL DEFAULT 'deja',
 
+  UNIQUE (user_id, intent_id),
   INDEX idx_trades_user_closed (user_id, closed_at DESC),
   INDEX idx_trades_user_asset (user_id, asset),
   INDEX idx_trades_intent (intent_id)
@@ -284,6 +286,7 @@ CREATE TABLE IF NOT EXISTS patterns (
   -- August's "62% from 61" are both true, and the revision history is itself
   -- evidence that the memory layer learns.
   superseded_by UUID REFERENCES patterns(id) ON DELETE SET NULL,
+  refresh_key   STRING NOT NULL,
 
   kind          pattern_kind NOT NULL,
   statement     STRING NOT NULL,
@@ -302,13 +305,15 @@ CREATE TABLE IF NOT EXISTS patterns (
   -- rows rather than trusted because it is stored.
   filter        JSONB NOT NULL DEFAULT '{}'::JSONB,
 
+  UNIQUE (user_id, refresh_key),
   INDEX idx_patterns_user_live (user_id, kind, superseded_by)
 );
 
 CREATE TABLE IF NOT EXISTS pattern_evidence (
+  user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   pattern_id UUID NOT NULL REFERENCES patterns(id) ON DELETE CASCADE,
   trade_id   UUID NOT NULL REFERENCES trades(id) ON DELETE CASCADE,
-  PRIMARY KEY (pattern_id, trade_id),
+  PRIMARY KEY (user_id, pattern_id, trade_id),
   INDEX idx_pattern_evidence_trade (trade_id)
 );
 

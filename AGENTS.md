@@ -9,7 +9,7 @@ Deja is a paper-trading decision-memory layer. Preserve the locked scope in `doc
 - Do not edit another project.
 
 ## Current gate
-Implement the Phase 5 interface only: replace the starter page with a responsive paper-trade intent form and result workspace for the existing tracer contract. Use a calm editorial utility style, native Tailwind/CSS, clear BLOCK/WARN/PASS hierarchy, keyboard and screen-reader support, and explicit loading, empty, fixture-preview, degraded, and unavailable states. Any fixture history must be visibly labelled as example data and must never look live. Do not add an unauthenticated API route or let a browser-supplied tenant ID reach service adapters. Do not start paper execution, closure, pattern generation, deployment, or cloud provisioning in this gate.
+Implement Phase 6 only: a production-facing paper-execution and closure-to-memory domain slice behind trusted server context. Add deterministic paper-open and close logic, tenant-scoped persistence operations, append-only decision/event evidence, evidence-tiered cohort recomputation, statistically gated pattern candidates, and warning compliance self-audit. Browser fields must never select `user_id`. BLOCK cannot execute. WARN execution records explicit defiance. Close computes outcome from validated fills, attaches it to the original intent/brief/warnings, and derives all statistics from stored outcomes. No API route, browser wiring, scheduled job, fake price feed, live database/provider call, CSV import, deployment, or cloud provisioning in this gate.
 
 ## Discipline
 1. Use strict test-driven development. Add one failing behavior test, run it and record the expected failure, implement the minimum code, then rerun targeted and full checks.
@@ -29,4 +29,4 @@ Implement the Phase 5 interface only: replace the starter page with a responsive
 - Build: `npm run build`
 
 ## Completion
-Gate passes only when the RED and GREEN evidence is recorded in `BUILD_STATUS.md`, all service and rule-engine tests pass, lint has no errors, production build passes, and the working diff contains only Phase 4 files.
+Gate passes only when Phase 6 RED and GREEN evidence is recorded in `BUILD_STATUS.md`, targeted and full tests pass, TypeScript and lint have no new errors, production build and dependency audit pass, the diff is independently reviewed, and the main agent has verified the exact staged files before commit.
