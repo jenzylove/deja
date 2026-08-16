@@ -1229,3 +1229,34 @@ Missing actor -> 503 before any work (intents, trades, insights); duplicate exec
 
 ### Decision
 Paused at the deployment authorization boundary awaiting the user's choice (merge to main vs deploy vs extend auth). No commits to `main`, no deployment, no credential access, no live DB, no dependency change.
+
+## Slice 5: CockroachDB runtime store wiring (live)
+
+The app now runs the paper-trade/decision/monitor/settle/events/insights path on a real CockroachDB Serverless cluster (deja-trading-31266…crdb.io, v26.2.5). The DSN is in gitignored `.env.local`; schema provisioned idempotently (14 tables incl. behavior_events and settlements).
+
+### Live E2E (ran against the cluster, cleaned up after)
+```text
+RULES_SEEDED | RULES_PRESENT=1 | DECISION=ok  (resolveDecisionFromRules read a stored rule and returned the same verdict as the in-memory engine)
+EXECUTED_<tradeId>   | OPEN_TRADES=1 COUNT=1 ENTRY=100 | MONITOR=1 STOP=95
+CLOSE_PNL=20 R=2     | SETTLE=settled/already_settled (idempotent)
+EVENTS=1 TYPES=monitoring | PATTERNS=0 | CLOSED_OUTCOMES=1
+LIVE_E2E_OK
+```
+execute -> monitor -> close -> settle -> events -> insights all persist real rows on CockroachDB.
+
+### Cockroach-vs-pg bugs found by running against a real driver (not mocked)
+- pg returns Cockroach TIMESTAMPTZ as a JS `Date`; the descriptor-safe capture rejected any `Date`, so every timestamped read failed live. Fixed: `plainDataSnapshot` normalizes `Date` -> ISO string (safe, trap-free).
+- `duration_s INT` rejected fractional sub-second closes. Fixed: round to whole seconds at the DB boundary (return + stored value consistent).
+- pg returns Cockroach integer columns as strings (e.g. `version`). Fixed: `toFiniteNumber` coercion in the event/persistence reads.
+- `compileRule` requires a rule id; the store's decision read now selects and passes it.
+
+### What changed
+- `CockroachPaperStore` (src/lib/paper-store.ts) now also implements PaperOpsStore + InsightsStore and the drop-in request-path surface: listMonitorableOpenTrades, recordBehaviorEvent, listBehaviorEvents, listSettleableTrades, settleAtomic (idempotent ON CONFLICT DO NOTHING), listPatternCandidates (with pattern_evidence lineage), registerPendingIntent (UPSERT pending trade_intent), openTrades, openTradeCount, resolveDecisionFromRules (reads stored rules, reuses the shared compileRule/evaluateRules engine).
+- `paper-app.ts`: picks CockroachPaperStore when DATABASE_URL is set, else the in-memory store (ephemeral fallback). Same interface, fail-closed on persistence errors.
+- `trade-route.ts`: `registerPendingIntent` is now awaited so the async DB write completes before execution claims the intent; store dep widened to `MemoryPaperStore | CockroachPaperStore`.
+- `paper-trade.ts`: descriptor-safe capture tolerates `Date` values.
+
+### Honest limitations
+- Single configured tenant actor (DEJA_ACTOR_USER_ID) until real auth is built; the actor must exist as a row in `users` for FK enforcement.
+- No deployment yet; secret stays in gitignored .env.local, never committed.
+- Full suite 160/160, tsc, lint (1 pre-existing), build (8 routes), audit clean.

@@ -10,6 +10,7 @@ import {
   type WarningCode,
 } from "./paper-trade";
 import { MemoryPaperStore } from "./paper-store-memory";
+import { type CockroachPaperStore } from "./paper-store";
 import {
   buildBehaviorEvent,
   evaluateDejaPositions,
@@ -25,7 +26,7 @@ export const MAX_TRADE_BODY_BYTES = 16_384;
 
 export interface TradeRouteDependencies {
   resolveActor(): Promise<AuthenticatedTenantContext | null>;
-  store: MemoryPaperStore;
+  store: MemoryPaperStore | CockroachPaperStore;
   resolveDecision(
     intent: unknown,
     userId: string,
@@ -230,7 +231,7 @@ export function createTradeExecuteHandler(deps: TradeRouteDependencies) {
       if (decision.decision === "BLOCK") {
         return json({ state: "blocked", decision: "BLOCK", message: "Blocked trade intents cannot execute." }, 409);
       }
-      deps.store.registerPendingIntent({
+      await deps.store.registerPendingIntent({
         userId: actor.userId,
         intentId,
         asset: intent.asset,

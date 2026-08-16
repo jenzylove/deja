@@ -1,19 +1,23 @@
 import type { AuthenticatedTenantContext } from "./intent-service";
 import { resolveConfiguredActor } from "./server-actor";
 import { MemoryPaperStore } from "./paper-store-memory";
+import { CockroachPaperStore } from "./paper-store";
+import { envStatus } from "./env";
 import type { WarningCode } from "./paper-trade";
 import { defaultPriceFeed } from "./price-feed";
 import type { TradeRouteDependencies } from "./trade-route";
 
 /**
- * Shared local-development wiring: a single in-memory store instance behind the
- * existing paper store interface, plus the fail-closed configured-single-tenant
- * actor resolver. In a release build this store is replaced by the live
- * CockroachDB adapter behind the same interface; without a live connection the
- * in-memory adapter fails closed when persistence is required but absent.
+ * Shared wiring. When a live CockroachDB connection is configured
+ * (DATABASE_URL present) the app uses the tenant-scoped CockroachPaperStore so
+ * paper trades, decisions, outcomes, monitoring, settlement, behavior events, and
+ * insights persist to the real cluster. Without one it falls back to the
+ * in-memory store (ephemeral, clearly local). Both expose the same interface and
+ * fail closed on persistence errors. The actor resolver stays the fail-closed
+ * configured single tenant until real authentication is wired.
  */
 class PaperApp {
-  readonly store = new MemoryPaperStore();
+  readonly store = envStatus().hasDatabase ? new CockroachPaperStore() : new MemoryPaperStore();
   readonly resolveActor: () => Promise<AuthenticatedTenantContext | null> =
     () => resolveConfiguredActor();
 

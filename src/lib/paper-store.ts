@@ -11,11 +11,22 @@ import {
   type PaperMemoryStore,
   type PatternCandidate,
   type WarningAuditRow,
+  type WarningCode,
   captureDescriptorSafeSqlResult,
   createPatternCandidate,
   validatePatternCandidate,
   validateWarningAuditRows,
 } from "./paper-trade";
+import {
+  type BehaviorEvent,
+  type MonitorableOpenTrade,
+  type PaperOpsStore,
+  type SettleAttempt,
+  type SettleableTrade,
+  validateBehaviorEvent,
+} from "./paper-ops";
+import { type InsightsStore } from "./insights";
+import { compileRule, evaluateRules, type RuleField } from "./rules";
 
 export interface SqlResult<T = Record<string, unknown>> { rows: T[]; rowCount: number | null }
 export interface SqlClient {
@@ -65,6 +76,19 @@ function capturedRows<T extends object>(
 }
 function malformedSql(): never { throw new PaperTradeError("PERSISTENCE_UNAVAILABLE"); }
 
+/** pg returns Cockroach TIMESTAMPTZ as a JS Date; normalize to an ISO-8601 UTC string. */
+function toIsoUtc(value: unknown): string {
+  const d = value instanceof Date ? value : new Date(value as string);
+  if (!Number.isFinite(d.getTime())) malformedSql();
+  return d.toISOString();
+}
+/** DECIMAL columns come back as strings; convert and fail closed if not a finite number. */
+function toFiniteNumber(value: unknown): number {
+  const n = typeof value === "string" || typeof value === "number" ? Number(value) : NaN;
+  if (!Number.isFinite(n)) malformedSql();
+  return n;
+}
+
 const INTENT_FIELDS = ["asset", "direction", "size", "entry", "initial_stop", "initial_target", "account_id"] as const;
 const REPLAY_FIELDS = ["decision_id", "trade_id"] as const;
 const ID_FIELDS = ["id"] as const;
@@ -73,8 +97,25 @@ const CLOSED_FIELDS = ["trade_id", "intent_id", "thesis_raw", "r_multiple", "ass
 const PATTERN_SOURCE_FIELDS = ["id", "intent_id", "thesis_raw", "r_multiple", "asset", "asset_class", "direction", "strategy", "regime"] as const;
 const WARNING_FIELDS = ["tradeId", "code", "shown", "defied", "rMultiple"] as const;
 const PERSISTED_FIELDS = ["trade_id"] as const;
+const MONITORABLE_FIELDS = ["trade_id", "intent_id", "asset", "direction", "size", "entry_fill", "stop", "target", "opened_at", "closed_at"] as const;
+const SETTLEABLE_FIELDS = ["trade_id", "asset", "direction", "pnl", "r_multiple", "exit_reason", "closed_at"] as const;
+const BEHAVIOR_FIELDS = ["id", "version", "type", "at", "subject_kind", "subject_id", "availability", "acceptance", "outcome", "verification"] as const;
+const SETTLE_TRADE_FIELDS = ["pnl", "r_multiple", "exit_reason", "closed_at"] as const;
+const SETTLE_EXISTING_FIELDS = ["pnl", "r_multiple"] as const;
+const OPEN_TRADE_FIELDS = ["t_id", "asset", "asset_class", "direction", "size", "entry_fill", "stop", "opened_at"] as const;
 
-export class CockroachPaperStore implements PaperExecutionStore, PaperClosureStore, PaperMemoryStore {
+/** Maps a violating rule field to the warning the UI shows. Mirrors paper-store-memory. */
+const FIELD_TO_WARNING: Record<RuleField, WarningCode> = {
+  risk_pct: "OVERSIZED_RISK",
+  minutes_since_last_loss: "POST_LOSS_REENTRY",
+  trades_today: "DAILY_CAP_EXCEEDED",
+  has_stop_loss: "NO_STOP_LOSS",
+  size_increase_after_loss: "SIZE_ESCALATION",
+};
+
+export class CockroachPaperStore
+  implements PaperExecutionStore, PaperClosureStore, PaperMemoryStore, PaperOpsStore, InsightsStore
+{
   constructor(private readonly pool: SqlPool = db()) {}
 
   async openAtomic(input: OpenExecutionInput): Promise<OpenExecutionResult> {
@@ -177,18 +218,19 @@ export class CockroachPaperStore implements PaperExecutionStore, PaperClosureSto
         openedAt: raw.opened_at, closedAt: raw.closed_at,
       };
       const result = input.compute(row);
+      const durationS = Math.round(result.durationS);
       const updatedResult = await client.query(
         `UPDATE trades
             SET closed_at = $3, exit_fill = $4, pnl = $5, r_multiple = $6,
                 duration_s = $7, exit_reason = $8::exit_reason
           WHERE user_id = $1 AND id = $2 AND closed_at IS NULL`,
         [input.userId, input.tradeId, input.closedAt, input.exitFill, result.pnl,
-          result.rMultiple, result.durationS, input.exitReason],
+          result.rMultiple, durationS, input.exitReason],
       );
       const updated = capturedResult(updatedResult, [], [0]);
       if (updated.rowCount !== 1) throw new PaperTradeError("TRADE_ALREADY_CLOSED");
       await client.query("COMMIT");
-      return result;
+      return { ...result, durationS };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -410,14 +452,361 @@ export class CockroachPaperStore implements PaperExecutionStore, PaperClosureSto
          ON CONFLICT (user_id, code) DO UPDATE SET
            times_shown = excluded.times_shown,
            times_heeded = excluded.times_heeded,
-           times_defied = excluded.times_defied,
            r_when_heeded = excluded.r_when_heeded,
-           r_when_defied = excluded.r_when_defied,
-           computed_at = excluded.computed_at
-         WHERE warning_outcomes.user_id = $1`,
-        [userId, row.code, row.timesShown, row.timesHeeded, row.timesDefied,
-          row.rWhenHeeded, row.rWhenDefied],
-      );
-    }
-  }
-}
+                     r_when_defied = excluded.r_when_defied,
+                     computed_at = excluded.computed_at
+                   WHERE warning_outcomes.user_id = $1`,
+                   [userId, row.code, row.timesShown, row.timesHeeded, row.timesDefied,
+                     row.rWhenHeeded, row.rWhenDefied],
+                 );
+               }
+             }
+
+             // ---- PaperOpsStore: monitoring / settlement / behavioral events ----
+
+             async listMonitorableOpenTrades(userId: string): Promise<MonitorableOpenTrade[]> {
+               if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+               const client = await this.pool.connect();
+               try {
+                 const result = await client.query<Record<string, unknown>>(
+                   `SELECT t.id AS trade_id, i.id AS intent_id, i.asset,
+                           t.direction::STRING AS direction, t.size, t.entry_fill,
+                           t.initial_stop AS stop, t.initial_target AS target,
+                           t.opened_at, t.closed_at
+                      FROM trades t
+                      JOIN trade_intents i ON i.id = t.intent_id AND i.user_id = $1
+                     WHERE t.user_id = $1 AND t.closed_at IS NULL
+                     ORDER BY t.opened_at DESC, t.id`,
+                   [userId],
+                 );
+                 const rows = capturedRows<Record<string, unknown>>(result, MONITORABLE_FIELDS);
+                 if (rows.some(
+                   (r) => !UUID.test(r.trade_id as string) || !UUID.test(r.intent_id as string) ||
+                     typeof r.asset !== "string" || r.asset.length === 0 ||
+                     (r.direction !== "long" && r.direction !== "short") ||
+                     !validDecimal(r.size as string) || !validDecimal(r.entry_fill as string) ||
+                     (r.stop !== null && !validDecimal(r.stop as string)) ||
+                     (r.target !== null && !validDecimal(r.target as string)) ||
+                     r.closed_at !== null,
+                 )) malformedSql();
+                 return rows.map((row) => ({
+                   tradeId: row.trade_id, intentId: row.intent_id, asset: row.asset,
+                   direction: row.direction, entryFill: toFiniteNumber(row.entry_fill),
+                   size: toFiniteNumber(row.size),
+                   stop: row.stop === null ? null : toFiniteNumber(row.stop),
+                   target: row.target === null ? null : toFiniteNumber(row.target),
+                   openedAt: toIsoUtc(row.opened_at), closedAt: null,
+                 })) as unknown as MonitorableOpenTrade[];
+               } catch {
+                 throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+               } finally { client.release(); }
+             }
+
+             async recordBehaviorEvent(event: BehaviorEvent): Promise<void> {
+               const v = validateBehaviorEvent(event);
+               const client = await this.pool.connect();
+               try {
+                 await client.query(
+                   `INSERT INTO behavior_events
+                     (user_id, version, type, at, subject_kind, subject_id, availability, acceptance, outcome, verification)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::JSONB, $10::JSONB)`,
+                   [v.userId, v.version, v.type, v.at, v.subjectKind, v.subjectId ?? null,
+                     v.availability, v.acceptance,
+                     v.outcome === null ? null : JSON.stringify(v.outcome),
+                     JSON.stringify(v.verification)],
+                 );
+               } catch {
+                 throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+               } finally { client.release(); }
+             }
+
+             async listBehaviorEvents(userId: string): Promise<BehaviorEvent[]> {
+               if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+               const client = await this.pool.connect();
+               try {
+                 const result = await client.query<Record<string, unknown>>(
+                   `SELECT id, version, type, at, subject_kind, subject_id, availability, acceptance, outcome, verification
+                      FROM behavior_events WHERE user_id = $1 ORDER BY at DESC, id`,
+                   [userId],
+                 );
+                 const rows = capturedRows<Record<string, unknown>>(result, BEHAVIOR_FIELDS);
+                 const events: BehaviorEvent[] = [];
+                 for (const row of rows) {
+                   try {
+                     events.push(validateBehaviorEvent({
+                                           version: toFiniteNumber(row.version), id: row.id, userId, type: row.type, at: toIsoUtc(row.at),
+                       subjectKind: row.subject_kind, subjectId: row.subject_id ?? null,
+                       availability: row.availability, acceptance: row.acceptance,
+                       outcome: row.outcome === null ? null : row.outcome,
+                       verification: row.verification,
+                     }));
+                   } catch {
+                     malformedSql();
+                   }
+                 }
+                 return events;
+                               } catch {
+                                 throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                               } finally { client.release(); }
+             }
+
+             async listSettleableTrades(userId: string): Promise<SettleableTrade[]> {
+               if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+               const client = await this.pool.connect();
+               try {
+                 const result = await client.query<Record<string, unknown>>(
+                   `SELECT t.id AS trade_id, i.asset, t.direction::STRING AS direction,
+                           t.pnl, t.r_multiple, t.exit_reason::STRING AS exit_reason, t.closed_at
+                      FROM trades t
+                      JOIN trade_intents i ON i.id = t.intent_id AND i.user_id = $1
+                     WHERE t.user_id = $1 AND t.closed_at IS NOT NULL AND t.pnl IS NOT NULL AND t.r_multiple IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM settlements s WHERE s.user_id = $1 AND s.trade_id = t.id)
+                     ORDER BY t.closed_at DESC, t.id`,
+                   [userId],
+                 );
+                 const rows = capturedRows<Record<string, unknown>>(result, SETTLEABLE_FIELDS);
+                 const out: SettleableTrade[] = [];
+                 for (const row of rows) {
+                   if (!UUID.test(row.trade_id as string) || typeof row.asset !== "string" || row.asset.length === 0 ||
+                       (row.direction !== "long" && row.direction !== "short") ||
+                       typeof row.exit_reason !== "string" || row.exit_reason.length === 0) malformedSql();
+                   out.push({
+                     tradeId: row.trade_id as string, asset: row.asset as string, direction: row.direction as string,
+                     pnl: toFiniteNumber(row.pnl), rMultiple: toFiniteNumber(row.r_multiple),
+                     exitReason: row.exit_reason as SettleableTrade["exitReason"],
+                     closedAt: toIsoUtc(row.closed_at),
+                   });
+                 }
+                 return out;
+               } catch {
+                 throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+               } finally { client.release(); }
+             }
+
+             async settleAtomic(userId: string, tradeId: string, settledAt: string): Promise<SettleAttempt> {
+               if (!validUserId(userId) || !UUID.test(tradeId)) throw new PaperTradeError("INVALID_REQUEST");
+               const client = await this.pool.connect();
+               try {
+                 await client.query("BEGIN");
+                 const tradeResult = await client.query<Record<string, unknown>>(
+                   `SELECT pnl, r_multiple, exit_reason::STRING AS exit_reason, closed_at
+                      FROM trades WHERE user_id = $1 AND id = $2 FOR UPDATE`,
+                   [userId, tradeId],
+                 );
+                 const tradeRows = capturedRows<Record<string, unknown>>(tradeResult, SETTLE_TRADE_FIELDS);
+                 if (tradeRows.length === 0) throw new PaperTradeError("TRADE_NOT_FOUND");
+                 const trade = tradeRows[0];
+                 if (trade.closed_at === null || trade.pnl === null || trade.r_multiple === null) {
+                   throw new PaperTradeError("TRADE_NOT_CLOSED");
+                 }
+                 const inserted = await client.query<{ id: string }>(
+                   `INSERT INTO settlements (user_id, trade_id, pnl, r_multiple, exit_reason, settled_at)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (user_id, trade_id) DO NOTHING
+                    RETURNING id`,
+                   [userId, tradeId, trade.pnl, trade.r_multiple, trade.exit_reason, settledAt],
+                 );
+                 if (inserted.rows.length === 0) {
+                   const existingResult = await client.query<Record<string, unknown>>(
+                     `SELECT pnl, r_multiple FROM settlements WHERE user_id = $1 AND trade_id = $2`,
+                     [userId, tradeId],
+                   );
+                   await client.query("COMMIT");
+                   const existing = capturedRows<Record<string, unknown>>(existingResult, SETTLE_EXISTING_FIELDS);
+                   if (existing.length === 0 || existing[0].pnl === null || existing[0].r_multiple === null) malformedSql();
+                   return {
+                     state: "already_settled",
+                     pnl: toFiniteNumber(existing[0].pnl),
+                     rMultiple: toFiniteNumber(existing[0].r_multiple),
+                   };
+                 }
+                 await client.query("COMMIT");
+                 return {
+                   state: "settled",
+                   pnl: toFiniteNumber(trade.pnl),
+                   rMultiple: toFiniteNumber(trade.r_multiple),
+                 };
+               } catch (error) {
+                 await client.query("ROLLBACK").catch(() => {});
+                 throw error;
+               } finally { client.release(); }
+             }
+
+             // ---- InsightsStore: pattern candidates read ----
+
+             async listPatternCandidates(userId: string): Promise<PatternCandidate[]> {
+               if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+               const client = await this.pool.connect();
+               try {
+                 const result = await client.query<Record<string, unknown>>(
+                   `SELECT id, kind::STRING AS kind, statement, n, wins, losses, rate,
+                           ci_low, ci_high, effect_size, evidence_tier::STRING AS evidence_tier, filter
+                      FROM patterns WHERE user_id = $1 AND superseded_by IS NULL
+                     ORDER BY created_at DESC, id`,
+                   [userId],
+                 );
+                 const candidates: PatternCandidate[] = [];
+                 for (const row of result.rows as Array<Record<string, unknown>>) {
+                   const pid = row.id as string;
+                   if (!UUID.test(pid)) malformedSql();
+                   const evidenceResult = await client.query<{ trade_id: string }>(
+                     `SELECT trade_id FROM pattern_evidence WHERE user_id = $1 AND pattern_id = $2 ORDER BY trade_id`,
+                     [userId, pid],
+                   );
+                   const sourceTradeIds = evidenceResult.rows.map((r) => r.trade_id);
+                   try {
+                     candidates.push(validatePatternCandidate({
+                       kind: row.kind,
+                       statement: row.statement,
+                       n: toFiniteNumber(row.n),
+                       wins: toFiniteNumber(row.wins),
+                       losses: toFiniteNumber(row.losses),
+                       rate: toFiniteNumber(row.rate),
+                       interval: { low: toFiniteNumber(row.ci_low), high: toFiniteNumber(row.ci_high) },
+                       effectSize: toFiniteNumber(row.effect_size),
+                       tier: row.evidence_tier,
+                       filter: row.filter,
+                       sourceTradeIds,
+                     }));
+                   } catch {
+                     malformedSql();
+                   }
+                 }
+                 return candidates;
+                               } catch {
+                                 throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                               } finally { client.release(); }
+                             }
+
+                   // ---- Drop-in methods used by the request path (pending intent, open reads) ----
+
+                   /** Provisions a tenant-scoped pending trade intent so execution can claim it. */
+                   async registerPendingIntent(input: {
+                     userId: string;
+                     intentId: string;
+                     asset: string;
+                     assetClass: string;
+                     direction: "long" | "short";
+                     size: number;
+                     entry: number;
+                     stopLoss: number | null;
+                     takeProfit: number | null;
+                     riskPct: number;
+                     thesisRaw: string;
+                     strategy: string | null;
+                     regime: string;
+                     session: string;
+                   }): Promise<void> {
+                     if (!validUserId(input.userId) || !UUID.test(input.intentId)) throw new PaperTradeError("INVALID_REQUEST");
+                     const client = await this.pool.connect();
+                     try {
+                       await client.query(
+                         `INSERT INTO trade_intents
+                            (id, user_id, asset, asset_class, direction, size, entry, stop_loss, take_profit,
+                             risk_pct, thesis_raw, session, regime, status)
+                          VALUES ($1,$2,$3,$4,$5::direction,$6,$7,$8,$9,$10,$11,$12::session,$13::regime,'pending')
+                          ON CONFLICT (id) DO NOTHING`,
+                         [input.intentId, input.userId, input.asset, input.assetClass, input.direction,
+                           input.size, input.entry, input.stopLoss, input.takeProfit, input.riskPct,
+                           input.thesisRaw, input.session, input.regime],
+                       );
+                     } catch {
+                       throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                     } finally { client.release(); }
+                   }
+
+                   /** Tenant-scoped list of the actor's open (unclosed) paper trades. */
+                   async openTrades(userId: string): Promise<{
+                     id: string; asset: string; assetClass: string; direction: string;
+                     size: number; entry: number; stop: number | null; openedAt: string;
+                   }[]> {
+                     if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+                     const client = await this.pool.connect();
+                     try {
+                       const result = await client.query<Record<string, unknown>>(
+                                               `SELECT t.id AS t_id, i.asset, i.asset_class, t.direction::STRING AS direction,
+                                                       t.size, t.entry_fill, t.initial_stop AS stop, t.opened_at
+                                                  FROM trades t
+                                                  JOIN trade_intents i ON i.id = t.intent_id AND i.user_id = $1
+                                                 WHERE t.user_id = $1 AND t.closed_at IS NULL
+                           ORDER BY t.opened_at DESC, t.id`,
+                         [userId],
+                       );
+                       const rows = capturedRows<Record<string, unknown>>(result, OPEN_TRADE_FIELDS);
+                       const out: { id: string; asset: string; assetClass: string; direction: string; size: number; entry: number; stop: number | null; openedAt: string }[] = [];
+                       for (const row of rows) {
+                         if (!UUID.test(row.t_id as string) || typeof row.asset !== "string" || typeof row.asset_class !== "string" ||
+                             (row.direction !== "long" && row.direction !== "short") ||
+                             !validDecimal(row.size as string) || !validDecimal(row.entry_fill as string) ||
+                             (row.stop !== null && !validDecimal(row.stop as string))) malformedSql();
+                         out.push({
+                           id: row.t_id as string, asset: row.asset as string, assetClass: row.asset_class as string,
+                           direction: row.direction as string, size: toFiniteNumber(row.size),
+                           entry: toFiniteNumber(row.entry_fill),
+                           stop: row.stop === null ? null : toFiniteNumber(row.stop),
+                           openedAt: toIsoUtc(row.opened_at),
+                         });
+                       }
+                       return out;
+                     } catch {
+                       throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                     } finally { client.release(); }
+                   }
+
+                   async openTradeCount(userId: string): Promise<number> {
+                     if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+                     const client = await this.pool.connect();
+                     try {
+                       const result = await client.query(
+                         `SELECT count(*)::INT AS n FROM trades WHERE user_id = $1 AND closed_at IS NULL`,
+                         [userId],
+                       );
+                       const row = result.rows[0] as Record<string, unknown> | undefined;
+                       const n = row === undefined ? NaN : toFiniteNumber(row.n);
+                       if (!Number.isSafeInteger(n)) malformedSql();
+                       return n;
+                     } catch {
+                       throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                     } finally { client.release(); }
+                   }
+
+                   async resolveDecisionFromRules(
+                     rawIntent: unknown,
+                     userId: string,
+                   ): Promise<{ decision: "BLOCK" | "WARN" | "PASS"; warningsShown: WarningCode[] }> {
+                     if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+                     if (typeof rawIntent !== "object" || rawIntent === null || Array.isArray(rawIntent)) {
+                       throw new PaperTradeError("INVALID_REQUEST");
+                     }
+                     const intent = rawIntent as Record<string, unknown>;
+                     if (typeof intent.riskPct !== "number" || !Number.isFinite(intent.riskPct) ||
+                         typeof intent.sizeIncreaseAfterLoss !== "boolean") {
+                       throw new PaperTradeError("INVALID_REQUEST");
+                     }
+                     const stopLoss = typeof intent.stopLoss === "number" && Number.isFinite(intent.stopLoss) ? intent.stopLoss : null;
+                     const client = await this.pool.connect();
+                     try {
+                       const result = await client.query(
+                                               `SELECT id, predicate, enforcement::STRING AS enforcement
+                                                  FROM rules WHERE user_id = $1 AND active = TRUE AND retired_at IS NULL`,
+                                               [userId],
+                                             );
+                                             const compiled = result.rows.map((row: Record<string, unknown>) =>
+                                               compileRule({ id: row.id, predicate: row.predicate, enforcement: row.enforcement as "warn" | "block" }));
+                       const state = {
+                         risk_pct: typeof intent.riskPct === "number" ? intent.riskPct : 0,
+                         minutes_since_last_loss: Number.MAX_SAFE_INTEGER,
+                         trades_today: 0,
+                         has_stop_loss: stopLoss !== null,
+                         size_increase_after_loss: intent.sizeIncreaseAfterLoss === true,
+                       };
+                       const { decision, evidence } = evaluateRules(compiled, state);
+                       const warningsShown = evidence
+                         .filter((row) => !row.passed && row.enforcement === "warn" && row.field !== undefined)
+                         .map((row) => FIELD_TO_WARNING[row.field as RuleField] as WarningCode);
+                       return { decision, warningsShown: [...new Set(warningsShown)] };
+                                           } catch {
+                                             throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                                           } finally { client.release(); }
+                   }
+                 }

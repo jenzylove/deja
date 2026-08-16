@@ -98,6 +98,9 @@ type PlainData = null | undefined | string | number | boolean | bigint | PlainDa
 /** Capture untrusted data once without property reads, then validate only the detached immutable copy. */
 function plainDataSnapshot(value: unknown, ancestors = new WeakSet<object>()): PlainData {
   if (value === null || (typeof value !== "object" && typeof value !== "function")) return value as PlainData;
+  // pg returns Cockroach TIMESTAMPTZ as a JS Date; normalize to an ISO-8601 UTC
+  // string (a safe, trap-free read) so timestamped rows survive descriptor capture.
+  if (value instanceof Date) return value.toISOString() as PlainData;
   if (typeof value === "function" || utilTypes.isProxy(value)) throw new PaperTradeError("INVALID_REQUEST");
   const source = value as object;
   if (ancestors.has(source)) throw new PaperTradeError("INVALID_REQUEST");
@@ -348,6 +351,7 @@ export async function closePaperTrade(
         typeof captured.rMultiple !== "number" || !Number.isFinite(captured.rMultiple) ||
         typeof captured.durationS !== "number" || !Number.isFinite(captured.durationS) ||
         !positive(captured.exitFill) || !EXIT_REASONS.includes(captured.exitReason as ExitReason)) {
+      console.log("CAVE_CLOSE_RECHECK", JSON.stringify(captured));
       throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
     }
     return {
