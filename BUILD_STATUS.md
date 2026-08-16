@@ -1260,3 +1260,27 @@ execute -> monitor -> close -> settle -> events -> insights all persist real row
 - Single configured tenant actor (DEJA_ACTOR_USER_ID) until real auth is built; the actor must exist as a row in `users` for FK enforcement.
 - No deployment yet; secret stays in gitignored .env.local, never committed.
 - Full suite 160/160, tsc, lint (1 pre-existing), build (8 routes), audit clean.
+
+## Slice 6: Authorized deployment + live end-to-end smoke (DONE)
+
+Railway project `deja` (deja-production), public URL: https://deja-production-944a.up.railway.app
+- Dockerfile (multi-stage, Next standalone), .railwayignore (excludes .env*, node_modules, .next), env set on the service: DATABASE_URL, DEJA_ACTOR_MODE=configured-single-tenant, DEJA_ACTOR_USER_ID (=seeded user in `users`).
+- Schema migration was authorized and run against the live CockroachDB cluster.
+
+### Live end-to-end, verified through the public URL (real DB writes)
+```text
+GET  /                   200  (home)
+GET  /api/trades          200  {"trades":[]}
+POST /api/trades         200  {"state":"executed", tradeId b17026dd…, BTC long @64000}
+GET  /api/trades          200  shows the open trade
+POST /api/trades/close   200  {"state":"closed", outcome pnl=100 rMultiple=2 win:true, memory evidence anecdote n=1}
+GET  /api/trades/settle   200  {"state":"settleable", trades[…pnl:100 r=2…]}
+GET  /api/trades/monitor  200  (priceFeed unavailable -> manual-close-only, fail closed)
+GET  /api/insights        200  {"state":"ok","dna":[{n:1, tier:anecdote, episodes:[rMultiple:2]}], "warnings":[]}
+```
+execute -> close -> settlement -> Trading DNA all read/write the real CockroachDB cluster.
+
+### Honest notes
+- Real Bedrock is not configured: the /api/intents reasoning brief is degraded (no creds). The decision/execute/monitor/settle/insight loop — the core of Deja — works fully without it (decisions come from stored rules, prices fail closed).
+- The CoinGecko price feed reports unavailable from the Railway region (egress/rate-limit), so monitoring is manual-close-only there, as the fail-closed design intends, not silent.
+- Single configured tenant until real auth is built; secret stays in gitignored .env.local and Railway env; never committed.
