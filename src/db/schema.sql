@@ -333,3 +333,36 @@ CREATE TABLE IF NOT EXISTS warning_outcomes (
   computed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, code)
 );
+
+-- ---------------------------------------------------------------------------
+-- Behavioral events (append-only) and paper settlements, added when the live
+-- Cockroach store was wired as the runtime adapter. Both are tenant-scoped and
+-- append-only, mirroring the in-memory adapter's semantics.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS behavior_events (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  version      INT NOT NULL DEFAULT 1,
+  type         STRING NOT NULL,
+  at           TIMESTAMPTZ NOT NULL,
+  subject_kind STRING NOT NULL,
+  subject_id   UUID,
+  availability STRING NOT NULL,
+  acceptance   STRING NOT NULL,
+  outcome      JSONB,
+  verification JSONB NOT NULL DEFAULT '{}'::JSONB,
+  INDEX idx_behavior_user (user_id, at DESC)
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_id    UUID NOT NULL REFERENCES trades(id) ON DELETE CASCADE,
+  pnl         DECIMAL(18,2) NOT NULL,
+  r_multiple  DECIMAL(10,3) NOT NULL,
+  exit_reason exit_reason NOT NULL,
+  settled_at  TIMESTAMPTZ NOT NULL,
+  UNIQUE (user_id, trade_id),
+  INDEX idx_settlements_user (user_id, settled_at DESC)
+);
