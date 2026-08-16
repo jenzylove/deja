@@ -357,6 +357,15 @@ export class MemoryPaperStore
     return rows;
   }
 
+  /** Tenant-scoped read of the stored qualified pattern candidates. */
+  async listPatternCandidates(userId: string): Promise<unknown[]> {
+    this.guard();
+    if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+    return this.patterns
+      .filter((row) => row.userId === userId)
+      .map((row) => ({ ...row.candidate }));
+  }
+
   async loadWarningObservations(userId: string): Promise<unknown[]> {
     this.guard();
     if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");

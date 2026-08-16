@@ -1,26 +1,32 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import {
   EXAMPLE_RESULT,
   FIELD_OPTIONS,
   buildClosePayload,
   buildExecutePayload,
+  formatEvidenceRate,
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
   interpretCloseApiResponse,
+  interpretInsightsApiResponse,
   interpretIntentApiResponse,
   interpretTradeApiResponse,
+  renderR,
   toTradeIntentInput,
   warningsShownFromResult,
   type CloseTradeApiSuccess,
+  type DnaRow,
   type ExecuteTradeApiSuccess,
+  type InsightsState,
   type IntentDraft,
   type IntentErrors,
   type IntentSubmissionState,
   type WarningCode,
+  type WarningLedgerRow,
 } from "@/lib/intent-ui";
 
 const INITIAL_DRAFT: IntentDraft = {
@@ -486,6 +492,115 @@ function ClosedOutcomeView({ closed }: { closed: CloseTradeApiSuccess }) {
   );
 }
 
+function InsightsSection() {
+  const [insights, setInsights] = useState<InsightsState>({ kind: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/insights", { cache: "no-store" });
+        const body: unknown = await response.json();
+        if (!cancelled) setInsights(interpretInsightsApiResponse(response.status, body));
+      } catch {
+        if (!cancelled) setInsights({ kind: "unavailable", message: "Insights could not be reached." });
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <section className="insights-panel" aria-labelledby="insights-heading">
+      <div className="panel-heading">
+        <p className="section-kicker">Trading DNA</p>
+        <h2 id="insights-heading">Evidence from your paper decisions</h2>
+        <p>Derived only from your stored, closed outcomes and warning observations. No statistic without its cohort size.</p>
+      </div>
+
+      {insights.kind === "loading" ? (
+        <p className="field-help" aria-live="polite">Loading insights…</p>
+      ) : insights.kind === "unavailable" ? (
+        <div className="empty-state" aria-live="polite">
+          <strong className="empty-index" aria-hidden="true">—</strong>
+          <div>
+            <h3>Insights unavailable</h3>
+            <p>{insights.message}</p>
+          </div>
+        </div>
+      ) : (
+        <div className="insights-content">
+          <section aria-label="Strategy evidence">
+            <h4>Strategy DNA</h4>
+            {insights.insights.dna.length === 0 ? (
+              <p className="field-help">No sustained strategy cohort yet. Close paper trades to build evidence.</p>
+            ) : (
+              <DnaTable rows={insights.insights.dna} />
+            )}
+          </section>
+          <section aria-label="Warning compliance self audit">
+            <h4>Warning compliance ledger</h4>
+            {insights.insights.warnings.length === 0 ? (
+              <p className="field-help">No warnings shown against closed trades yet.</p>
+            ) : (
+              <WarningsTable rows={insights.insights.warnings} />
+            )}
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DnaTable({ rows }: { rows: DnaRow[] }) {
+  return (
+    <div className="insight-table" role="table" aria-label="Strategy DNA">
+      {rows.map((row) => (
+        <div className="insight-row" role="row" key={row.strategy ?? "__none__"}>
+          <div role="cell" className="insight-cell">
+            <strong>{row.strategy === null ? "No strategy" : titleCase(row.strategy ?? "")}</strong>
+            <span className="tier-badge">{row.tier}</span>
+          </div>
+          <div role="cell" className="insight-cell">
+            <span className="field-help">n={row.n}</span>
+          </div>
+          <div role="cell" className="insight-cell">
+            {formatEvidenceRate(row) ?? <span className="field-help">{row.caveat}</span>}
+          </div>
+          <div role="cell" className="insight-cell">
+            avg {renderR(row.averageR)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WarningsTable({ rows }: { rows: WarningLedgerRow[] }) {
+  return (
+    <div className="insight-table" role="table" aria-label="Warning compliance">
+      {rows.map((row) => (
+        <div className="insight-row" role="row" key={row.code}>
+          <div role="cell" className="insight-cell">
+            <strong>{row.code}</strong>
+          </div>
+          <div role="cell" className="insight-cell">
+            <span className="field-help">shown {row.shown}</span>
+          </div>
+          <div role="cell" className="insight-cell">
+            <span className="field-help">defied {row.defied}</span>
+          </div>
+          <div role="cell" className="insight-cell">
+            <span className="field-help">{row.defiedWithWin} win / {row.defiedWithLoss} loss</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EmptyWorkspace() {
   const view = getWorkspaceView("empty");
   return (
@@ -864,6 +979,8 @@ export default function Home() {
           </div>
         </aside>
       </div>
+
+      <InsightsSection />
 
       <footer className="footer-note">
         <p>Decision support for paper trading. Deja does not predict markets or route real orders.</p>

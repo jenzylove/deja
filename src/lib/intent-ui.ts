@@ -493,3 +493,77 @@ export const EXAMPLE_RESULT: {
     },
   ],
 };
+
+// ---- Insights (Trading DNA + warning-compliance) client contract ----
+
+export interface DnaEpisodeRow {
+  tradeId: string;
+  thesisRaw: string;
+  rMultiple: number;
+  asset: string;
+}
+
+export interface DnaRow {
+  strategy: string | null;
+  n: number;
+  tier: "anecdote" | "signal" | "established";
+  wins: number | null;
+  losses: number | null;
+  rate: number | null;
+  averageR: number | null;
+  caveat: string;
+  episodes: DnaEpisodeRow[];
+}
+
+export interface WarningLedgerRow {
+  code: string;
+  shown: number;
+  heeded: number;
+  defied: number;
+  defiedWithWin: number;
+  defiedWithLoss: number;
+}
+
+export interface InsightsPayload {
+  dna: DnaRow[];
+  warnings: WarningLedgerRow[];
+}
+
+export type InsightsState =
+  | { kind: "loading" }
+  | { kind: "ok"; insights: InsightsPayload }
+  | { kind: "unavailable"; message: string };
+
+function isInsightsPayload(value: unknown): value is InsightsPayload {
+  if (!isRecord(value)) return false;
+  if (!Array.isArray(value.dna) || !Array.isArray(value.warnings)) return false;
+  const okDna = value.dna.every((row) => isRecord(row)
+    && typeof row.n === "number"
+    && ["anecdote", "signal", "established"].includes(String(row.tier)));
+  const okWarnings = value.warnings.every((row) => isRecord(row)
+    && typeof row.code === "string"
+    && typeof row.shown === "number");
+  return okDna && okWarnings;
+}
+
+export function interpretInsightsApiResponse(status: number, body: unknown): InsightsState {
+  if (status >= 200 && status < 300 && isRecord(body) && body.state === "ok" && isInsightsPayload(body)) {
+    return { kind: "ok", insights: { dna: body.dna, warnings: body.warnings } };
+  }
+  if (status >= 500 && isRecord(body) && typeof body.message === "string") {
+    return { kind: "unavailable", message: body.message };
+  }
+  return { kind: "unavailable", message: "Insights could not be loaded." };
+}
+
+/** Render an evidence-tiered rate; never show a percentage for an anecdote cohort. */
+export function formatEvidenceRate(row: DnaRow): string | null {
+  if (row.tier === "anecdote" || row.rate === null || row.n < 15) return null;
+  return `${(row.rate * 100).toFixed(0)}% win rate (n=${row.n})`;
+}
+
+export function renderR(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}R`;
+}

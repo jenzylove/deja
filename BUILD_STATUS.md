@@ -1165,3 +1165,39 @@ git diff --check                                passed
 - No live CockroachDB/Bedrock; in-memory/local persistence and an always-fail-closed default price feed (monitoring works only via an injected simulated feed in tests/server-config).
 - Real authentication, Trading DNA view, warning-compliance ledger view, migration, deployment, and browser dogfood remain (later slices).
 - No deployment, credential access, dependency change, or cloud provisioning performed.
+
+## Slice 4: Trading DNA and warning-compliance (self-audit) views
+
+Branch: `feat/end-to-end-app`.
+
+### RED
+Command: `npx tsx --test test/insights.test.ts`
+Failed as expected: module `../src/lib/insights` was not found; client insight helpers were absent.
+
+### GREEN and verification
+```text
+npx tsx --test test/insights.test.ts           10 passed, 0 failed
+npm run test:paper                              56 passed, 0 failed
+npm run test:ui                                 21 passed, 0 failed
+npm test                                        154 passed, 0 failed
+npx tsc --noEmit --incremental false            passed
+npm run lint                                    0 errors, 1 pre-existing warning in scripts/check-memory.ts
+npm run build                                   passed; routes: /api/insights added (8 dynamic routes total)
+npm audit --omit=dev                            found 0 vulnerabilities
+git diff --check                                passed
+```
+
+### What changed
+- `src/lib/insights.ts`: `buildInsightsView` deriving, per trusted tenant only from stored closed outcomes, warning observations, and already-qualified pattern candidates: `deriveDna` (per-strategy evidence cohort rows via recomputeCohortEvidence), `deriveWarnings` (warning ledger reusing recomputeWarningAudit plus a defied win/loss split), `derivePatterns` (validated pattern lineage). Anecdote cohorts expose raw episodes and a caveat, never an unsupported percentage. Descriptor-safe deep-frozen detached output; persistence/malformed-store failures fail closed to PERSISTENCE_UNAVAILABLE.
+- `src/lib/insights-route.ts`: `createInsightsHandler` (GET, missing actor -> 503, sanitized failures) returning `{state:'ok', dna, patterns, warnings}`.
+- `src/app/api/insights/route.ts`: wired with the shared store + actor resolver.
+- `src/lib/paper-store-memory.ts`: added tenant-scoped, fail-closed `listPatternCandidates(userId)` read; restored `loadClosedOutcomes` body intact.
+- `src/lib/intent-ui.ts`: `interpretInsightsApiResponse`, `formatEvidenceRate` (never a % below n=15 or on anecdote), `renderR`, and DNA/warning ledger client types.
+- `src/app/page.tsx`: `InsightsSection` fetches `/api/insights` on mount and renders Strategy DNA (tier, n, rate-or-caveat, avg R) and a Warning Compliance ledger (shown/defied/win-loss), with loading/empty/unavailable states. Example fixtures stay labeled and out of this path.
+- `src/app/globals.css`: styles for the insights panel/tables.
+- `test/insights.test.ts` (10) + `test/intent-ui.test.ts` (3 new): per-tenant DNA, no-double-count warning sums, anecdote caveat not %, pattern lineage, malformed/persistence-failure sanitized, missing-actor 503, frozen/detached output, response interpretation, and anecdote-never-percentage rendering.
+
+### Honest limitations
+- No live CockroachDB/Bedrock; derived from in-memory/local stored activity until the persistence adapter is live.
+- Real authentication, recovery-state sweep, migration, deployment, and browser dogfood remain (later slices).
+- No deployment, credential access, dependency change, or cloud provisioning performed.

@@ -6,14 +6,17 @@ import {
   FIELD_OPTIONS,
   buildClosePayload,
   buildExecutePayload,
+  formatEvidenceRate,
   getIntentErrors,
   getOutcomeTone,
   getWorkspaceView,
   interpretCloseApiResponse,
+  interpretInsightsApiResponse,
   interpretIntentApiResponse,
   interpretTradeApiResponse,
   toTradeIntentInput,
   warningsShownFromResult,
+  type DnaRow,
   type IntentDraft,
   type WarningCode,
 } from "../src/lib/intent-ui";
@@ -316,4 +319,36 @@ test("malformed close success output fails closed as unavailable", () => {
     kind: "unavailable",
     message: "The close response was invalid.",
   });
+});
+
+test("insights response interprets a real ok payload as dna + warning ledger", () => {
+  const body = {
+    state: "ok",
+    dna: [
+      { strategy: "breakout_retest", n: 3, tier: "anecdote", wins: null, losses: null, rate: null, averageR: null, caveat: "anecdote", episodes: [{ tradeId: "11111111-1111-4111-8111-111111111111", thesisRaw: "t", rMultiple: 0.5, asset: "BTC" }] },
+    ],
+    warnings: [{ code: "NO_STOP_LOSS", shown: 2, heeded: 1, defied: 1, defiedWithWin: 0, defiedWithLoss: 1 }],
+  };
+  const state = interpretInsightsApiResponse(200, body);
+  assert.equal(state.kind, "ok");
+  if (state.kind === "ok") {
+    assert.equal(state.insights.dna[0].n, 3);
+    assert.equal(state.insights.warnings[0].defiedWithLoss, 1);
+  }
+});
+
+test("interpretInsightsApiResponse fails closed on malformed or unavailable", () => {
+  assert.equal(interpretInsightsApiResponse(200, { state: "bogus" }).kind, "unavailable");
+  assert.equal(interpretInsightsApiResponse(200, { state: "ok", dna: "nope", warnings: [] }).kind, "unavailable");
+  const unavailable = interpretInsightsApiResponse(503, { state: "unavailable", message: "gone." });
+  assert.deepEqual(unavailable, { kind: "unavailable", message: "gone." });
+});
+
+test("anecdote cohorts never render an unsupported percentage", () => {
+  const anecdote: DnaRow = { strategy: "reversal", n: 3, tier: "anecdote", wins: null, losses: null, rate: null, averageR: null, caveat: "anecdote", episodes: [] };
+  assert.equal(formatEvidenceRate(anecdote), null);
+  const tiny: DnaRow = { strategy: "reversal", n: 6, tier: "signal", wins: 4, losses: 2, rate: 0.66, averageR: 0.4, caveat: "signal", episodes: [] };
+  assert.equal(formatEvidenceRate(tiny), null);
+  const coherent: DnaRow = { strategy: "reversal", n: 20, tier: "established", wins: 14, losses: 6, rate: 0.7, averageR: 0.4, caveat: "established", episodes: [] };
+  assert.match(formatEvidenceRate(coherent) ?? "", /70%/);
 });

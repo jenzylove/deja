@@ -924,3 +924,42 @@ fieldset:disabled {
 .closed-trade .section-heading {
   margin-top: 22px;
 }
+
+.insights-panel {
+  grid-column: 1 / -1;
+  margin-top: 2.25rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--line, #ece7df);
+}
+
+.insights-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 860px) {
+  .insights-content { grid-template-columns: 1fr; }
+}
+
+.insight-table {
+  border: 1px solid var(--line, #ece7df);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.insight-row {
+  display: grid;
+  grid-template-columns: 2fr 0.6fr 1.6fr 1fr;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.75rem 1rem;
+}
+.insight-row + .insight-row {
+  border-top: 1px solid var(--line, #ece7df);
+}
+.insight-cell { display: flex; flex-direction: column; gap: 0.2rem; }
+.tier-badge {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a7a5a;
+}
