@@ -2,6 +2,7 @@ import type { AuthenticatedTenantContext } from "./intent-service";
 import { resolveConfiguredActor } from "./server-actor";
 import { MemoryPaperStore } from "./paper-store-memory";
 import type { WarningCode } from "./paper-trade";
+import { unavailablePriceFeed } from "./paper-ops";
 import type { TradeRouteDependencies } from "./trade-route";
 
 /**
@@ -31,5 +32,6 @@ export function tradeRouteDependencies(): TradeRouteDependencies {
     resolveActor: paperApp.resolveActor,
     store: paperApp.store,
     resolveDecision: paperApp.resolveDecision,
+    priceFeed: unavailablePriceFeed,
   };
 }

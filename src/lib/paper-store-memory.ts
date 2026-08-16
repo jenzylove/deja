@@ -15,6 +15,15 @@ import {
   type WarningCode,
 } from "./paper-trade";
 import {
+  buildBehaviorEvent,
+  validateBehaviorEvent,
+  type BehaviorEvent,
+  type MonitorableOpenTrade,
+  type PaperOpsStore,
+  type SettleAttempt,
+  type SettleableTrade,
+} from "./paper-ops";
+import {
   compileRule,
   evaluateRules,
   type RuleField,
@@ -78,6 +87,7 @@ interface StoredTrade {
   size: number;
   entry: number;
   stop: number | null;
+  target: number | null;
   openedAt: string;
   closedAt: string | null;
   exitFill: number | null;
@@ -96,6 +106,18 @@ function validateIntentId(value: unknown): asserts value is string {
   }
 }
 
+/** Append-only settlement record: never overwritten, xref back to the closed trade. */
+interface SettledTradeRow {
+  tradeId: string;
+  userId: string;
+  asset: string;
+  direction: string;
+  pnl: number;
+  rMultiple: number;
+  exitReason: string;
+  settledAt: string;
+}
+
 /**
  * In-memory adapter behind the existing paper store interface. Used for local
  * development and tests when no live CockroachDB connection is configured.
@@ -105,7 +127,7 @@ function validateIntentId(value: unknown): asserts value is string {
  * rather than silently pretending to persist.
  */
 export class MemoryPaperStore
-  implements PaperExecutionStore, PaperClosureStore, PaperMemoryStore
+  implements PaperExecutionStore, PaperClosureStore, PaperMemoryStore, PaperOpsStore
 {
   private readonly intents = new Map<string, StoredIntent>();
   private readonly decisions = new Map<string, StoredDecision>();
@@ -115,6 +137,8 @@ export class MemoryPaperStore
   private readonly patterns: { userId: string; candidate: PatternCandidate }[] = [];
   private readonly warningAudit = new Map<string, WarningAuditRow[]>();
   private readonly integrityToken: string;
+  private readonly behaviorEvents: BehaviorEvent[] = [];
+  private readonly settledTrades = new Map<string, SettledTradeRow>();
 
   constructor(
     private readonly options: { requireLive?: boolean; liveConnection?: unknown } = {},
@@ -261,6 +285,7 @@ export class MemoryPaperStore
       size: intent.size,
       entry: intent.entry,
       stop: intent.stopLoss,
+      target: intent.takeProfit,
       openedAt: new Date().toISOString(),
       closedAt: null,
       exitFill: null,
@@ -388,6 +413,107 @@ export class MemoryPaperStore
 
   async openTradeCount(userId: string): Promise<number> {
     return (await this.openTrades(userId)).length;
+  }
+
+  async listMonitorableOpenTrades(userId: string): Promise<MonitorableOpenTrade[]> {
+    this.guard();
+    if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+    return [...this.trades.values()]
+      .filter((trade) => trade.userId === userId && trade.closedAt === null)
+      .map((trade) => ({
+        tradeId: trade.id,
+        intentId: trade.intentId,
+        asset: trade.asset,
+        direction: trade.direction,
+        entryFill: trade.entry,
+        size: trade.size,
+        stop: trade.stop,
+        target: trade.target,
+        openedAt: trade.openedAt,
+        closedAt: null,
+      }));
+  }
+
+  async recordBehaviorEvent(event: BehaviorEvent): Promise<void> {
+    this.guard();
+    const validated = validateBehaviorEvent(event);
+    this.behaviorEvents.push({
+      ...validated,
+      outcome: validated.outcome === null ? null : { ...validated.outcome },
+      verification: { ...validated.verification },
+    });
+  }
+
+  async listBehaviorEvents(userId: string): Promise<BehaviorEvent[]> {
+    this.guard();
+    if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+    return this.behaviorEvents
+      .filter((event) => event.userId === userId)
+      .map((event) => validateBehaviorEvent({
+        ...event,
+        outcome: event.outcome === null ? null : { ...event.outcome },
+        verification: { ...event.verification },
+      }));
+  }
+
+  async listSettleableTrades(userId: string): Promise<SettleableTrade[]> {
+    this.guard();
+    if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+    const rows: SettleableTrade[] = [];
+    for (const trade of this.trades.values()) {
+      if (trade.userId !== userId || trade.closedAt === null || trade.pnl === null || trade.rMultiple === null) {
+        continue;
+      }
+      const key = this.key(userId, trade.id);
+      if (this.settledTrades.has(key)) continue;
+      rows.push({
+        tradeId: trade.id, asset: trade.asset, direction: trade.direction,
+        pnl: trade.pnl, rMultiple: trade.rMultiple,
+        exitReason: (trade.exitReason ?? "manual") as SettleableTrade["exitReason"],
+        closedAt: trade.closedAt,
+      });
+    }
+    return rows;
+  }
+
+  async settleAtomic(userId: string, tradeId: string, settledAt: string): Promise<SettleAttempt> {
+    this.guard();
+    if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+    validateIntentId(tradeId);
+    const trade = this.trades.get(tradeId);
+    if (!trade || trade.userId !== userId) throw new PaperTradeError("TRADE_NOT_FOUND");
+    if (trade.closedAt === null || trade.pnl === null || trade.rMultiple === null) {
+      throw new PaperTradeError("TRADE_NOT_CLOSED");
+    }
+    const key = this.key(userId, tradeId);
+    const existing = this.settledTrades.get(key);
+    if (existing) {
+      await this.recordBehaviorEvent(buildBehaviorEvent({
+        userId, type: "settlement", subjectKind: "trade", subjectId: tradeId, at: settledAt,
+        availability: "atomic", acceptance: "already_settled",
+        outcome: { tradeId, pnl: existing.pnl, rMultiple: existing.rMultiple, exitReason: existing.exitReason },
+        verification: { idempotent: true, decision: null },
+      }));
+      return { state: "already_settled", pnl: existing.pnl, rMultiple: existing.rMultiple };
+    }
+    await this.markSettled({
+      tradeId, userId, asset: trade.asset, direction: trade.direction,
+      pnl: trade.pnl, rMultiple: trade.rMultiple,
+      exitReason: trade.exitReason ?? "manual", settledAt,
+    });
+    const entry = this.settledTrades.get(key)!;
+    await this.recordBehaviorEvent(buildBehaviorEvent({
+      userId, type: "settlement", subjectKind: "trade", subjectId: tradeId, at: settledAt,
+      availability: "atomic", acceptance: "settled",
+      outcome: { tradeId, pnl: entry.pnl, rMultiple: entry.rMultiple, exitReason: entry.exitReason },
+      verification: { idempotent: false, decision: null },
+    }));
+    return { state: "settled", pnl: entry.pnl, rMultiple: entry.rMultiple };
+  }
+
+  /** Persistence seam for settlement; substitutable in tests to simulate a write failure. */
+  async markSettled(row: SettledTradeRow): Promise<void> {
+    this.settledTrades.set(this.key(row.userId, row.tradeId), row);
   }
 
   async popOpenTradesForTest(userId: string, asset: string): Promise<number> {

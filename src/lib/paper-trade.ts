@@ -66,7 +66,7 @@ export interface PaperClosureStore {
 export type PaperTradeErrorCode =
   | "INVALID_REQUEST" | "EXECUTION_BLOCKED" | "INVALID_WARNING_DEFIANCE"
   | "PERSISTENCE_UNAVAILABLE" | "TRADE_NOT_FOUND" | "TRADE_ALREADY_CLOSED"
-  | "INVALID_INITIAL_RISK";
+  | "TRADE_NOT_CLOSED" | "INVALID_INITIAL_RISK";
 
 const PUBLIC_MESSAGES: Record<PaperTradeErrorCode, string> = {
   INVALID_REQUEST: "Paper trade request is invalid.",
@@ -75,6 +75,7 @@ const PUBLIC_MESSAGES: Record<PaperTradeErrorCode, string> = {
   PERSISTENCE_UNAVAILABLE: "Paper trade persistence is unavailable.",
   TRADE_NOT_FOUND: "Open paper trade was not found.",
   TRADE_ALREADY_CLOSED: "Paper trade is already closed.",
+  TRADE_NOT_CLOSED: "Paper trade is not yet closed.",
   INVALID_INITIAL_RISK: "Paper trade has invalid initial risk.",
 };
 

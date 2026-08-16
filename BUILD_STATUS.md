@@ -1126,3 +1126,42 @@ git diff --check                                 passed
 
 ### Next slice
 Monitoring/settlement and automatic behavioral event capture for the browser journey.
+
+## Slice 3: monitoring/settlement and behavioral event capture
+
+Branch: `feat/end-to-end-app`.
+
+### RED
+Command: `npx tsx --test test/paper-ops.test.ts`
+Failed as expected: route handlers / modules not yet wired; execution events were rejected by a strict event-type check.
+
+### GREEN and verification
+```text
+npx tsx --test test/paper-ops.test.ts          15 passed, 0 failed
+npm run test:paper                              56 passed, 0 failed
+npm test                                        141 passed, 0 failed
+npx tsc --noEmit --incremental false            passed
+npm run lint                                    0 errors, 1 pre-existing warning in scripts/check-memory.ts
+npm run build                                   passed; routes: intents, trades, trades/close, trades/events, trades/monitor, trades/settle
+npm audit --omit=dev                            found 0 vulnerabilities
+git diff --check                                passed
+```
+
+### What changed
+- `src/lib/paper-ops.ts`: `PriceFeed` (injectable; default `unavailablePriceFeed` fails closed to manual-close-only), `evaluateDejaPositions` (reuses closePaperTrade/computeClosure/closeAtomic to auto-close stop/target hits; never fabricates fills; price-feed-unavailable -> zero closure writes), `settleDoneTrades` (append-only paper settlement, idempotent, cross-tenant isolated), `listSettleablePositions`, and a versioned append-only `BehaviorEvent` contract with availability/acceptance/outcome/verification dimensions plus `validateBehaviorEvent`/`buildBehaviorEvent`.
+- `src/lib/trade-route.ts`: `createTradeMonitorHandler` (GET), `createBehaviorListHandler` (GET), `createSettleableViewHandler` (GET), `createTradeSettleHandler` (POST); closure behavioral event in the close handler; `TRADE_NOT_CLOSED` -> 404.
+- `src/lib/paper-store-memory.ts`: `PaperOpsStore` methods (`listMonitorableOpenTrades`, `recordBehaviorEvent`, `listBehaviorEvents`, `listSettleableTrades`, idempotent `settleAtomic` writing through an overridable `markSettled` seam); `target` persisted on open.
+- `src/lib/paper-trade.ts`: added `TRADE_NOT_CLOSED` error code.
+- `src/app/api/trades/monitor|events|settle/route.ts`: wired API routes; `paper-app.ts` defaults the price feed to fail-closed.
+- `test/paper-ops.test.ts`: 15 tests (stop/target auto-close, no-level open, price-feed-unavailable manual-close-only, tenant scope, versioned event listing, sanitized outcome/availability/acceptance/verification dimensions, settle idempotency, cross-tenant/malformed/open-trade rejection, malformed-feed zero-trap, persistence-failure sanitization, append-only/detached listing).
+
+### Bugs fixed by main agent (builder hit budget mid-slice)
+- `validateBehaviorEvent` checked the event `type` value against the field-name set `EVT_FIELDS` instead of `EVENT_TYPES`, rejecting every event as `INVALID_REQUEST` (broke all decision/execution recording). Fixed to `EVENT_TYPES.includes(...)`.
+- Wired the four missing route handlers, the closure-event recording, the three new API routes, and the default fail-closed feed that the builder left uncreated.
+- Refactored `settleAtomic` to route writes through an overridable `markSettled` seam so a test-substituted persistence failure surfaces as a sanitized 503.
+- Typed a test callback to satisfy strict tsc.
+
+### Honest limitations
+- No live CockroachDB/Bedrock; in-memory/local persistence and an always-fail-closed default price feed (monitoring works only via an injected simulated feed in tests/server-config).
+- Real authentication, Trading DNA view, warning-compliance ledger view, migration, deployment, and browser dogfood remain (later slices).
+- No deployment, credential access, dependency change, or cloud provisioning performed.

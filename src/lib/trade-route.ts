@@ -10,6 +10,15 @@ import {
   type WarningCode,
 } from "./paper-trade";
 import { MemoryPaperStore } from "./paper-store-memory";
+import {
+  buildBehaviorEvent,
+  evaluateDejaPositions,
+  listSettleablePositions,
+  settleDoneTrades,
+  unavailablePriceFeed,
+  validateBehaviorEventList,
+  type PriceFeed,
+} from "./paper-ops";
 import type { AuthenticatedTenantContext } from "./intent-service";
 
 export const MAX_TRADE_BODY_BYTES = 16_384;
@@ -21,6 +30,8 @@ export interface TradeRouteDependencies {
     intent: unknown,
     userId: string,
   ): Promise<{ decision: "BLOCK" | "WARN" | "PASS"; warningsShown: WarningCode[] }>;
+  /** Injectable simulated price source; absent => fail closed to manual-close-only. */
+  priceFeed?: PriceFeed;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -57,6 +68,12 @@ const closeSchema = z
   .object({
     tradeId: z.string().regex(UUID),
     exitFill: z.number().positive().finite(),
+  })
+  .strict();
+
+const settleSchema = z
+  .object({
+    tradeIds: z.array(z.string().regex(UUID)).min(1).max(100),
   })
   .strict();
 
@@ -135,6 +152,8 @@ function tradeErrorToResponse(error: PaperTradeError): Response {
       return json({ state: "not_found", message: error.message }, 404);
     case "TRADE_ALREADY_CLOSED":
       return json({ state: "already_closed", message: error.message }, 409);
+    case "TRADE_NOT_CLOSED":
+      return json({ state: "not_found", message: error.message }, 404);
     case "PERSISTENCE_UNAVAILABLE":
       return json({ state: "unavailable", message: error.message }, 503);
     default:
@@ -197,6 +216,17 @@ export function createTradeExecuteHandler(deps: TradeRouteDependencies) {
     const intent = parsed.data.intent;
     const intentId = deterministicIntentId(actor.userId, intent);
     try {
+      void deps.store.recordBehaviorEvent(buildBehaviorEvent({
+        userId: actor.userId, type: "decision", subjectKind: "intent", subjectId: intentId,
+        at: new Date().toISOString(), availability: "atomic",
+        acceptance: decision.decision === "BLOCK" ? "blocked"
+          : parsed.data.warningsDefied.length > 0 ? "defied" : "accepted",
+        outcome: {
+          decision: decision.decision, warningsShown: decision.warningsShown.join(","),
+          blocked: decision.decision === "BLOCK",
+        },
+        verification: { idempotent: false, decision: decision.decision },
+      }));
       if (decision.decision === "BLOCK") {
         return json({ state: "blocked", decision: "BLOCK", message: "Blocked trade intents cannot execute." }, 409);
       }
@@ -226,6 +256,13 @@ export function createTradeExecuteHandler(deps: TradeRouteDependencies) {
       if (!open) {
         return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
       }
+      void deps.store.recordBehaviorEvent(buildBehaviorEvent({
+        userId: actor.userId, type: "execution", subjectKind: "trade", subjectId: result.tradeId,
+        at: open.openedAt, availability: "atomic",
+        acceptance: result.replayed ? "replayed" : "new",
+        outcome: { tradeId: result.tradeId, action: parsed.data.action, replayed: result.replayed, decision: decision.decision },
+        verification: { idempotent: result.replayed, decision: decision.decision },
+      }));
       return json(
         {
           state: "executed",
@@ -306,16 +343,26 @@ export function createTradeCloseHandler(deps: TradeRouteDependencies) {
     }
 
     try {
+      const closedAt = new Date().toISOString();
       const outcome = await closePaperTrade(
         {
           tradeId: parsed.data.tradeId,
           exitFill: parsed.data.exitFill,
           exitReason: "manual" as const,
-          closedAt: new Date().toISOString(),
+          closedAt,
         },
         { userId: actor.userId },
         deps.store,
       );
+      void deps.store.recordBehaviorEvent(buildBehaviorEvent({
+        userId: actor.userId, type: "closure", subjectKind: "trade", subjectId: outcome.tradeId,
+        at: closedAt, availability: "atomic", acceptance: "closed",
+        outcome: {
+          tradeId: outcome.tradeId, exitFill: outcome.exitFill, exitReason: outcome.exitReason,
+          pnl: outcome.pnl, rMultiple: outcome.rMultiple,
+        },
+        verification: { idempotent: false, decision: null },
+      }));
       const memory = await refreshPaperMemory(
         { ...REFRESH_DEFAULTS, kind: "strategy" },
         { userId: actor.userId },
@@ -345,6 +392,139 @@ export function createTradeCloseHandler(deps: TradeRouteDependencies) {
         },
         200,
       );
+    } catch (error) {
+      if (error instanceof PaperTradeError) return tradeErrorToResponse(error);
+      return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
+    }
+  };
+}
+
+const UNTRUSTED_METHOD = json({ state: "method_not_allowed", message: "Method not allowed." }, 405);
+
+/**
+ * GET /api/trades/monitor — evaluate the tenant's open trades against the
+ * injected simulated price feed and auto-close any stop/target that is hit,
+ * reusing the shared closure path. Never fabricates fills. Fails closed to a
+ * price-feed-unavailable state (manual close only) when no price is available.
+ */
+export function createTradeMonitorHandler(deps: TradeRouteDependencies) {
+  return async function GET(request: Request): Promise<Response> {
+    if (request.method !== "GET") {
+      return json({ state: "method_not_allowed", message: "Use GET." }, 405);
+    }
+    const actor = await resolveActor(deps);
+    if (!actor) {
+      return json({ state: "unavailable", message: "Trusted server identity is unavailable." }, 503);
+    }
+    try {
+      const result = await evaluateDejaPositions({ userId: actor.userId }, {
+        store: deps.store,
+        priceFeed: deps.priceFeed ?? unavailablePriceFeed,
+        now: () => new Date().toISOString(),
+      });
+      if (result.open.length > 0 && result.closed.length === 0 && result.priceFeed === "unavailable") {
+        return json({
+          state: "price_feed_unavailable",
+          message: "Price feed is unavailable; use manual close only.",
+          manualCloseOnly: result.open.map((trade) => trade.tradeId),
+        }, 503);
+      }
+      return json({
+        priceFeed: result.priceFeed,
+        open: result.open,
+        closed: result.closed,
+        trades: result.open,
+      }, 200);
+    } catch (error) {
+      if (error instanceof PaperTradeError) return tradeErrorToResponse(error);
+      return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
+    }
+  };
+}
+
+/**
+ * GET /api/trades/events — list the actor's own append-only behavioral events
+ * (decision, execution, closure, monitoring, settlement), sanitized and
+ * detached. Never surfaces another tenant's events.
+ */
+export function createBehaviorListHandler(deps: TradeRouteDependencies) {
+  return async function GET(request?: Request): Promise<Response> {
+    if (request && request.method !== "GET") {
+      return UNTRUSTED_METHOD;
+    }
+    const actor = await resolveActor(deps);
+    if (!actor) {
+      return json({ state: "unavailable", message: "Trusted server identity is unavailable." }, 503);
+    }
+    try {
+      const raw = await deps.store.listBehaviorEvents(actor.userId);
+      const events = validateBehaviorEventList(raw);
+      return json({ events }, 200);
+    } catch (error) {
+      if (error instanceof PaperTradeError) return tradeErrorToResponse(error);
+      return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
+    }
+  };
+}
+
+/**
+ * GET /api/trades/settle — list the tenant's closed (done) positions that are
+ * not yet settled, with realized P&L and R multiple.
+ */
+export function createSettleableViewHandler(deps: TradeRouteDependencies) {
+  return async function GET(request?: Request): Promise<Response> {
+    if (request && request.method !== "GET") {
+      return UNTRUSTED_METHOD;
+    }
+    const actor = await resolveActor(deps);
+    if (!actor) {
+      return json({ state: "unavailable", message: "Trusted server identity is unavailable." }, 503);
+    }
+    try {
+      const trades = await listSettleablePositions({ userId: actor.userId }, deps.store);
+      return json({ state: "settleable", trades }, 200);
+    } catch (error) {
+      if (error instanceof PaperTradeError) return tradeErrorToResponse(error);
+      return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
+    }
+  };
+}
+
+/**
+ * POST /api/trades/settle — mark the tenant's closed paper positions settled
+ * (append-only; not money movement). Idempotent and cross-tenant isolated.
+ */
+export function createTradeSettleHandler(deps: TradeRouteDependencies) {
+  return async function POST(request: Request): Promise<Response> {
+    const actor = await resolveActor(deps);
+    if (!actor) {
+      return json({ state: "unavailable", message: "Trusted server identity is unavailable." }, 503);
+    }
+    let bodyText: string;
+    try {
+      bodyText = await readBoundedBody(request);
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        return json({ state: "validation_error", message: "Request body is too large." }, 413);
+      }
+      return json({ state: "validation_error", message: "Request body could not be read." }, 400);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText) as unknown;
+    } catch {
+      return json({ state: "validation_error", message: "Request body must be valid JSON." }, 400);
+    }
+    const parsed = settleSchema.safeParse(body);
+    if (!parsed.success) {
+      return json({ state: "validation_error", message: "Invalid settlement request." }, 400);
+    }
+    try {
+      const result = await settleDoneTrades(parsed.data, { userId: actor.userId }, {
+        store: deps.store,
+        settledAt: () => new Date().toISOString(),
+      });
+      return json({ state: "settled", results: result.results }, 200);
     } catch (error) {
       if (error instanceof PaperTradeError) return tradeErrorToResponse(error);
       return json({ state: "unavailable", message: "Paper trade service is unavailable." }, 503);
