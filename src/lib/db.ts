@@ -6,9 +6,16 @@ let roPool: Pool | null = null;
 
 /** Read/write pool for the application itself. */
 export function db(): Pool {
+  const url = env().DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is not set. The live CockroachDB adapter requires it; " +
+        "standalone mode uses the in-memory store and never opens this pool.",
+    );
+  }
   if (!appPool) {
     appPool = new Pool({
-      connectionString: env().DATABASE_URL,
+      connectionString: url,
       max: 10,
       idleTimeoutMillis: 30_000,
       // Generous: the cluster is multi-region, so first-connection latency is
