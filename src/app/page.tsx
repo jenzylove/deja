@@ -516,6 +516,109 @@ function Reveal({ children, className = "" }: { children: React.ReactNode; class
   );
 }
 
+interface CheckResult {
+  decision: "deja_vu" | "clear";
+  pattern: { title: string; n: number; losses: number; summary: string; actions: string[] } | null;
+  similarTrades: { asset: string; direction: string; outcome: string; rMultiple: number; similarity: number }[];
+}
+
+function TerminalSection() {
+  const [asset, setAsset] = useState("BTC");
+  const [direction, setDirection] = useState<"long" | "short">("long");
+  const [entry, setEntry] = useState("64000");
+  const [size, setSize] = useState("1");
+  const [leverage, setLeverage] = useState("5");
+  const [thesis, setThesis] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<CheckResult | null>(null);
+
+  async function review() {
+    setBusy(true);
+    setResult(null);
+    try {
+      const response = await fetch("/api/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          asset, direction, entry: Number(entry), size: Number(size),
+          leverage: Number(leverage), riskPct: 1, thesis,
+        }),
+      });
+      const body = await response.json();
+      setResult(body);
+    } catch {
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Reveal className="app-reveal">
+      <section className="terminal" aria-labelledby="terminal-heading">
+        <div className="panel-heading">
+          <p className="section-kicker">Live trading terminal</p>
+          <h2 id="terminal-heading">About to make a move? Check it with Deja first.</h2>
+          <p>Set the trade you are considering. Deja compares it against your imported history and tells you if you have been here before.</p>
+        </div>
+        <div className="terminal-grid">
+          <div className="terminal-form">
+            <div className="form-grid">
+              <div className="field"><label htmlFor="t-asset">Pair</label><input id="t-asset" value={asset} onChange={(e) => setAsset(e.target.value)} placeholder="BTC" /></div>
+              <div className="field"><label htmlFor="t-dir">Direction</label>
+                <select id="t-dir" value={direction} onChange={(e) => setDirection(e.target.value as "long" | "short")}>
+                  <option value="long">Long</option><option value="short">Short</option>
+                </select></div>
+              <div className="field"><label htmlFor="t-size">Size</label><input id="t-size" type="number" inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value)} /></div>
+              <div className="field"><label htmlFor="t-entry">Entry</label><input id="t-entry" type="number" inputMode="decimal" value={entry} onChange={(e) => setEntry(e.target.value)} /><p className="field-help">Current market price where available.</p></div>
+              <div className="field"><label htmlFor="t-leverage">Leverage</label><input id="t-leverage" type="number" inputMode="decimal" value={leverage} onChange={(e) => setLeverage(e.target.value)} /></div>
+            </div>
+            <div className="field thesis-field">
+              <label htmlFor="t-thesis">Why are you taking this trade?</label>
+              <textarea id="t-thesis" rows={3} value={thesis} onChange={(e) => setThesis(e.target.value)} placeholder="One sentence is enough." />
+            </div>
+            <div className="form-actions">
+              <button className="primary-button" type="button" onClick={review} disabled={busy || !thesis.trim() || !Number(entry)}>
+                {busy ? "Checking…" : "Review with Deja"}
+              </button>
+              <p className="field-help">Execution stays paper until a real broker is wired; Deja surfaces the pattern before any order.</p>
+            </div>
+          </div>
+
+          <div className="terminal-result" aria-live="polite">
+            {!result ? (
+              <div className="empty-state">
+                <div className="empty-index">?</div>
+                <div><h3>No review yet</h3><p>Configure a trade and press Review with Deja to see whether your own history flags a pattern.</p></div>
+              </div>
+            ) : result.decision === "deja_vu" && result.pattern ? (
+              <div className="deja-you">
+                <span className="deja-badge">{result.pattern.title}</span>
+                <h3>{result.pattern.summary}</h3>
+                <p>{result.pattern.losses} of {result.pattern.n} similar {asset} {direction}s went against you.</p>
+                <div className="deja-actions">
+                  <button className="primary-button" type="button" onClick={() => setResult(result)}>Reduce position</button>
+                  <button className="secondary-button" type="button">Proceed anyway</button>
+                  <button className="text-button" type="button">Cancel trade</button>
+                </div>
+              </div>
+            ) : (
+              <div className="deja-clear">
+                <span className="deja-badge clear">No concerning pattern detected</span>
+                <h3>Nothing like this in your history.</h3>
+                <p>{result.similarTrades.length} comparable trade{result.similarTrades.length === 1 ? "" : "s"} found, none of them a clear losing habit.</p>
+                <div className="deja-actions">
+                  <button className="primary-button" type="button">Proceed</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    </Reveal>
+  );
+}
+
 function InsightsSection() {
   const [insights, setInsights] = useState<InsightsState>({ kind: "loading" });
 
@@ -1024,6 +1127,8 @@ export default function Home() {
           </div>
         </aside>
       </div>
+
+      <TerminalSection />
 
       <Reveal className="app-reveal"><InsightsSection /></Reveal>
 

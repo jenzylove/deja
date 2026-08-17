@@ -68,8 +68,7 @@ function positive(v: unknown): v is number {
 
 function validOutcome(v: unknown): v is HistoryOutcome {
   return typeof v === "object" && v !== null &&
-    typeof (v as HistoryOutcome).tradeId === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((v as HistoryOutcome).tradeId) &&
+    typeof (v as HistoryOutcome).tradeId === "string" && (v as HistoryOutcome).tradeId.length > 0 &&
     typeof (v as HistoryOutcome).asset === "string" && (v as HistoryOutcome).asset.length > 0 &&
     ((v as HistoryOutcome).direction === "long" || (v as HistoryOutcome).direction === "short") &&
     positive((v as HistoryOutcome).size) &&

@@ -27,10 +27,10 @@ test("a profitable cohort yields a positive pattern, not just warnings", () => {
 });
 
 test("anecdote cohort (n<3) produces no directional conclusion", () => {
-  const sparse = [
+  const sparse: HistoryOutcome[] = [
     { tradeId: "00000000-0000-4000-8000-000000000001", asset: "BTC", direction: "long", size: 1, rMultiple: -1 },
   ];
-  const patterns = deriveDnaPatterns(sparse as any);
+  const patterns = deriveDnaPatterns(sparse);
   assert.ok(patterns.every((p) => p.n >= 3) || patterns.length === 0);
   assert.ok(!patterns.some((p) => p.id.startsWith("pair-")), "no single-trade conclusion");
 });

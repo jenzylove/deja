@@ -1216,3 +1216,47 @@ input, select, textarea { color: var(--ink); }
 @media (max-width: 560px) {
   .advanced-grid { grid-template-columns: 1fr; }
 }
+
+/* Live trading terminal */
+.terminal {
+  margin-top: 2.25rem;
+  padding: 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+.terminal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+@media (max-width: 860px) { .terminal-grid { grid-template-columns: 1fr; } }
+
+.deja-you, .deja-clear {
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  justify-content: center;
+}
+.deja-you { border-color: var(--block); background: var(--block-soft); }
+.deja-clear { border-color: var(--accent); background: var(--accent-soft); }
+.deja-badge {
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--block);
+}
+.deja-badge.clear { background: var(--accent-strong); }
+.deja-you h3, .deja-clear h3 { margin: 0; letter-spacing: -0.02em; }
+.deja-you p, .deja-clear p { margin: 0; color: var(--muted); }
+.deja-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.5rem; }
+.deja-actions .secondary-button { margin-top: 0; }
