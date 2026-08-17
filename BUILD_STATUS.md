@@ -1284,3 +1284,26 @@ execute -> close -> settlement -> Trading DNA all read/write the real CockroachD
 - Real Bedrock is not configured: the /api/intents reasoning brief is degraded (no creds). The decision/execute/monitor/settle/insight loop — the core of Deja — works fully without it (decisions come from stored rules, prices fail closed).
 - The CoinGecko price feed reports unavailable from the Railway region (egress/rate-limit), so monitoring is manual-close-only there, as the fail-closed design intends, not silent.
 - Single configured tenant until real auth is built; secret stays in gitignored .env.local and Railway env; never committed.
+
+## Exchange/PRD milestone — Déjà vu pre-trade check (live E2E)
+
+Pushed in slices: docs/EXCHANGE_PRD.md, broker seam (fail-closed), imported_trades
+(15 tables live), normalised import + sandbox-demo source, DNA behavioural
+patterns, /api/check, and the live trading terminal.
+
+Demo history seeded into the actor's Cockroach imported_trades (6 BTC longs, 4
+losses). Verified through the public URL:
+
+POST /api/check {"asset":"BTC","direction":"long","entry":100,...} -> 200
+  decision=deja_vu, pattern n=6 losses=4, actions [reduce_position, proceed_anyway, cancel],
+  similarTrades=6 (4 losses, with rMultiple + similarity).
+This reproduces PRD §14 ("Déjà vu detected ... 6 similar BTC trades, 4 lost").
+
+### Remaining / gated
+- Real execution adapter: requires a real exchange (sandbox/testnet) + user API
+  credentials + explicit budget. The broker seam reports broker mode but
+  canExecute()=false until a real adapter exists; no fake fills, no real money.
+- Auto-memory on real execution/close: the paper path already persists
+  decisions/executions/closures/outcomes; the real-order path is gated on the
+  same credentials.
+- Suite 178 tests, tsc, lint, build all green.
