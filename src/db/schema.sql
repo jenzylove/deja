@@ -366,3 +366,36 @@ CREATE TABLE IF NOT EXISTS settlements (
   UNIQUE (user_id, trade_id),
   INDEX idx_settlements_user (user_id, settled_at DESC)
 );
+
+-- ---------------------------------------------------------------------------
+-- Exchange-imported trading history (PRD §3.2). Normalized, tenant-scoped,
+-- append-like, keyed by the exchange's own order id so re-imports are
+-- idempotent. These records are what Trading DNA and the pre-trade Déjà vu
+-- check are built on; no manual re-entry required.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS imported_trades (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  exchange       STRING NOT NULL DEFAULT 'sandbox',
+  -- Exchange's own identifier; UNIQUE(user_id, exchange_order_id) makes imports idempotent.
+  exchange_order_id STRING NOT NULL,
+  asset          STRING NOT NULL,
+  direction      direction NOT NULL,
+  entry_price    DECIMAL(24,8) NOT NULL,
+  exit_price     DECIMAL(24,8),
+  size           DECIMAL(24,8) NOT NULL,
+  leverage       DECIMAL(6,2),
+  stop_loss      DECIMAL(24,8),
+  take_profit    DECIMAL(24,8),
+  entry_at       TIMESTAMPTZ NOT NULL,
+  exit_at        TIMESTAMPTZ,
+  pnl            DECIMAL(18,2),
+  fees           DECIMAL(18,2),
+  order_type     STRING NOT NULL DEFAULT 'market',
+  status         STRING NOT NULL DEFAULT 'closed',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, exchange_order_id),
+  INDEX idx_imported_user (user_id, entry_at DESC),
+  INDEX idx_imported_user_asset (user_id, asset)
+);

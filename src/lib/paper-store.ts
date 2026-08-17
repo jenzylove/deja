@@ -27,6 +27,7 @@ import {
 } from "./paper-ops";
 import { type InsightsStore } from "./insights";
 import { compileRule, evaluateRules, type RuleField } from "./rules";
+import { ImportedTradeError, isValidImportedTrade, type ImportedTrade } from "./imported-trade";
 
 export interface SqlResult<T = Record<string, unknown>> { rows: T[]; rowCount: number | null }
 export interface SqlClient {
@@ -808,5 +809,81 @@ export class CockroachPaperStore
                                            } catch {
                                              throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
                                            } finally { client.release(); }
-                   }
+                                         }
+
+                         // ---- Exchange-imported history (PRD §3.2) ----
+
+                         async upsertImportedTrades(userId: string, trades: readonly ImportedTrade[]): Promise<number> {
+                           if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+                           if (!Array.isArray(trades) || trades.some((t) => !isValidImportedTrade(t))) {
+                             throw new ImportedTradeError("invalid imported trade");
+                           }
+                           const client = await this.pool.connect();
+                           let wrote = 0;
+                           try {
+                             await client.query("BEGIN");
+                             for (const t of trades) {
+                               const ins = await client.query(
+                                 `INSERT INTO imported_trades
+                                    (user_id, exchange, exchange_order_id, asset, direction, entry_price, exit_price,
+                                     size, leverage, stop_loss, take_profit, entry_at, exit_at, pnl, fees, order_type, status)
+                                  VALUES ($1,$2,$3,$4,$5::direction,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                                  ON CONFLICT (user_id, exchange_order_id) DO UPDATE SET
+                                    exit_price = excluded.exit_price,
+                                    exit_at = excluded.exit_at,
+                                    pnl = excluded.pnl,
+                                    fees = excluded.fees,
+                                    status = excluded.status`,
+                                 [userId, t.exchange, t.exchangeOrderId, t.asset, t.direction, t.entryPrice,
+                                   t.exitPrice, t.size, t.leverage, t.stopLoss, t.takeProfit, t.entryAt, t.exitAt,
+                                   t.pnl, t.fees, t.orderType, t.status],
+                               );
+                               wrote += ins.rowCount ?? 0;
+                             }
+                             await client.query("COMMIT");
+                             return wrote;
+                           } catch {
+                             await client.query("ROLLBACK").catch(() => {});
+                             throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                           } finally { client.release(); }
+                         }
+
+                         async listImportedTrades(userId: string): Promise<ImportedTrade[]> {
+                           if (!validUserId(userId)) throw new PaperTradeError("INVALID_REQUEST");
+                           const client = await this.pool.connect();
+                           try {
+                             const result = await client.query<Record<string, unknown>>(
+                               `SELECT exchange, exchange_order_id, asset, direction::STRING AS direction,
+                                       entry_price, exit_price, size, leverage,
+                                       stop_loss, take_profit, entry_at, exit_at, pnl, fees, order_type, status
+                                  FROM imported_trades WHERE user_id = $1
+                                 ORDER BY entry_at DESC, exchange_order_id`,
+                               [userId],
+                             );
+                             const trades: ImportedTrade[] = [];
+                             for (const row of result.rows as Array<Record<string, unknown>>) {
+                               trades.push({
+                                 exchange: String(row.exchange),
+                                 exchangeOrderId: String(row.exchange_order_id),
+                                 asset: String(row.asset),
+                                 direction: row.direction === "short" ? "short" : "long",
+                                 entryPrice: toFiniteNumber(row.entry_price),
+                                 exitPrice: row.exit_price === null ? null : toFiniteNumber(row.exit_price),
+                                 size: toFiniteNumber(row.size),
+                                 leverage: row.leverage === null ? null : toFiniteNumber(row.leverage),
+                                 stopLoss: row.stop_loss === null ? null : toFiniteNumber(row.stop_loss),
+                                 takeProfit: row.take_profit === null ? null : toFiniteNumber(row.take_profit),
+                                 entryAt: toIsoUtc(row.entry_at),
+                                 exitAt: row.exit_at === null ? null : toIsoUtc(row.exit_at),
+                                 pnl: row.pnl === null ? null : toFiniteNumber(row.pnl),
+                                 fees: row.fees === null ? null : toFiniteNumber(row.fees),
+                                 orderType: String(row.order_type),
+                                 status: String(row.status),
+                               });
+                             }
+                             return trades;
+                           } catch {
+                             throw new PaperTradeError("PERSISTENCE_UNAVAILABLE");
+                           } finally { client.release(); }
+                         }
                  }
