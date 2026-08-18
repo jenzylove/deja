@@ -598,10 +598,27 @@ function TerminalSection() {
           </div>
 
           <div className="terminal-result" aria-live="polite">
-            {!result ? (
+            {!result && !decision ? (
               <div className="empty-state">
                 <div className="empty-index">?</div>
                 <div><h3>No review yet</h3><p>Configure a trade and press Review with Deja to see whether your own history flags a pattern.</p></div>
+              </div>
+            ) : !result && decision ? (
+              <div className="deja-resolved">
+                <span className="deja-badge clear">
+                  {decision === "reduced" ? "Position reduced" : decision === "proceeded" ? "Decision recorded" : "Trade cancelled"}
+                </span>
+                <h3>
+                  {decision === "reduced" ? `Order reduced. Size ${size} ${asset}.` : decision === "proceeded" ? "You chose to proceed." : "Trade discarded, nothing routed."}
+                </h3>
+                <p>
+                  {decision === "reduced"
+                    ? "Lower size lowers exposure, but this setup is still the same losing cohort. Proceed or run the check again."
+                    : "Your decision is stored as new memory. Deja will not place a real order until an exchange is wired and approved; the same check runs first."}
+                </p>
+                <div className="deja-actions">
+                  <button className="secondary-button" type="button" onClick={() => { setDecision(null); setResult(null); }}>Run the check again</button>
+                </div>
               </div>
             ) : result.decision === "deja_vu" && result.pattern ? (
               <div className="deja-you">
@@ -624,14 +641,6 @@ function TerminalSection() {
                 </div>
               </div>
             )}
-            {decision ? (
-              <div className="deja-outcome" aria-live="polite">
-                <strong className={decision === "cancelled" ? "muted" : undefined}>
-                  {decision === "reduced" ? "Order reduced and re-checked" : decision === "proceeded" ? "Decision recorded" : "Trade cancelled"}
-                </strong>
-                <p>Your choice has been stored ({decision}). This demo is paper-only: Deja will not place a real order until an exchange is wired and approved, then it routes through the same check first.</p>
-              </div>
-            ) : null}
           </div>
         </div>
       </section>
