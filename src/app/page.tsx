@@ -556,12 +556,13 @@ function TerminalSection() {
   }
 
   async function onReduce() {
-    // Halve the size and re-run the Déjà vu check against the reduced order.
+    // Halve the order. This lowers exposure but the setup (asset+direction)
+    // is still the same losing cohort, so we do not re-show the identical
+    // popup; we show a clean reduced state with the honest note.
     const half = Math.max(0.1, Number(size) / 2);
     setSize(String(half));
-    setDecision("reduced");
     setResult(null);
-    await review();
+    setDecision("reduced");
   }
 
   return (
