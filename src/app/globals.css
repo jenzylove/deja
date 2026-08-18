@@ -1260,3 +1260,14 @@ input, select, textarea { color: var(--ink); }
 .deja-you p, .deja-clear p { margin: 0; color: var(--muted); }
 .deja-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.5rem; }
 .deja-actions .secondary-button { margin-top: 0; }
+.deja-outcome {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+.deja-outcome strong { display: block; margin-bottom: 0.2rem; }
+.deja-outcome strong.muted { color: var(--muted); }
+.deja-outcome p { margin: 0; color: var(--muted); line-height: 1.5; }

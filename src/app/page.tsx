@@ -531,10 +531,12 @@ function TerminalSection() {
   const [thesis, setThesis] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CheckResult | null>(null);
+  const [decision, setDecision] = useState<null | "reduced" | "proceeded" | "cancelled">(null);
 
   async function review() {
     setBusy(true);
     setResult(null);
+    setDecision(null);
     try {
       const response = await fetch("/api/check", {
         method: "POST",
@@ -551,6 +553,15 @@ function TerminalSection() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onReduce() {
+    // Halve the size and re-run the Déjà vu check against the reduced order.
+    const half = Math.max(0.1, Number(size) / 2);
+    setSize(String(half));
+    setDecision("reduced");
+    setResult(null);
+    await review();
   }
 
   return (
@@ -597,9 +608,9 @@ function TerminalSection() {
                 <h3>{result.pattern.summary}</h3>
                 <p>{result.pattern.losses} of {result.pattern.n} similar {asset} {direction}s went against you.</p>
                 <div className="deja-actions">
-                  <button className="primary-button" type="button" onClick={() => setResult(result)}>Reduce position</button>
-                  <button className="secondary-button" type="button">Proceed anyway</button>
-                  <button className="text-button" type="button">Cancel trade</button>
+                  <button className="primary-button" type="button" onClick={onReduce}>Reduce position</button>
+                  <button className="secondary-button" type="button" onClick={() => setDecision("proceeded")}>Proceed anyway</button>
+                  <button className="text-button" type="button" onClick={() => { setResult(null); setDecision(null); setThesis(""); }}>Cancel trade</button>
                 </div>
               </div>
             ) : (
@@ -608,10 +619,18 @@ function TerminalSection() {
                 <h3>Nothing like this in your history.</h3>
                 <p>{result.similarTrades.length} comparable trade{result.similarTrades.length === 1 ? "" : "s"} found, none of them a clear losing habit.</p>
                 <div className="deja-actions">
-                  <button className="primary-button" type="button">Proceed</button>
+                  <button className="primary-button" type="button" onClick={() => setDecision("proceeded")}>Proceed</button>
                 </div>
               </div>
             )}
+            {decision ? (
+              <div className="deja-outcome" aria-live="polite">
+                <strong className={decision === "cancelled" ? "muted" : undefined}>
+                  {decision === "reduced" ? "Order reduced and re-checked" : decision === "proceeded" ? "Decision recorded" : "Trade cancelled"}
+                </strong>
+                <p>Your choice ({decision.replace("ed", "")}) has been stored. This demo is paper-only: Deja will not place a real order until an exchange is wired and approved, then it routes through the same check first.</p>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
