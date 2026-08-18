@@ -610,8 +610,8 @@ function TerminalSection() {
                 <p>{result.pattern.losses} of {result.pattern.n} similar {asset} {direction}s went against you.</p>
                 <div className="deja-actions">
                   <button className="primary-button" type="button" onClick={onReduce}>Reduce position</button>
-                  <button className="secondary-button" type="button" onClick={() => setDecision("proceeded")}>Proceed anyway</button>
-                  <button className="text-button" type="button" onClick={() => { setResult(null); setDecision(null); setThesis(""); }}>Cancel trade</button>
+                  <button className="secondary-button" type="button" onClick={() => { setResult(null); setDecision("proceeded"); }}>Proceed anyway</button>
+                  <button className="text-button" type="button" onClick={() => { setResult(null); setDecision("cancelled"); setThesis(""); }}>Cancel trade</button>
                 </div>
               </div>
             ) : (
