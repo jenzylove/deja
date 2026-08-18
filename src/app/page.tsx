@@ -620,7 +620,7 @@ function TerminalSection() {
                   <button className="secondary-button" type="button" onClick={() => { setDecision(null); setResult(null); }}>Run the check again</button>
                 </div>
               </div>
-            ) : result.decision === "deja_vu" && result.pattern ? (
+            ) : result?.decision === "deja_vu" && result.pattern ? (
               <div className="deja-you">
                 <span className="deja-badge">{result.pattern.title}</span>
                 <h3>{result.pattern.summary}</h3>
@@ -631,7 +631,7 @@ function TerminalSection() {
                   <button className="text-button" type="button" onClick={() => { setResult(null); setDecision("cancelled"); setThesis(""); }}>Cancel trade</button>
                 </div>
               </div>
-            ) : (
+            ) : result ? (
               <div className="deja-clear">
                 <span className="deja-badge clear">No concerning pattern detected</span>
                 <h3>Nothing like this in your history.</h3>
@@ -640,7 +640,7 @@ function TerminalSection() {
                   <button className="primary-button" type="button" onClick={() => setDecision("proceeded")}>Proceed</button>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </section>
