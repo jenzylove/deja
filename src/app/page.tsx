@@ -629,7 +629,7 @@ function TerminalSection() {
                 <strong className={decision === "cancelled" ? "muted" : undefined}>
                   {decision === "reduced" ? "Order reduced and re-checked" : decision === "proceeded" ? "Decision recorded" : "Trade cancelled"}
                 </strong>
-                <p>Your choice ({decision.replace("ed", "")}) has been stored. This demo is paper-only: Deja will not place a real order until an exchange is wired and approved, then it routes through the same check first.</p>
+                <p>Your choice has been stored ({decision}). This demo is paper-only: Deja will not place a real order until an exchange is wired and approved, then it routes through the same check first.</p>
               </div>
             ) : null}
           </div>
